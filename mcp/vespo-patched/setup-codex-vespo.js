@@ -10,8 +10,8 @@ import net from 'net';
 import http from 'http';
 
 const CONFIG = {
-  repoName: 'git-rag-chat',
-  repoUrl: 'https://github.com/SANARP98/git-rag-chat.git',
+  repoName: 'chromamcp-vespo',
+  repoUrl: 'https://github.com/SANARP98/chromamcp-vespo.git',
   networkName: 'chroma-net',
   containerName: 'chromadb-vespo',
   imageName: 'chroma-mcp-vespo-patched:latest',
