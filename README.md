@@ -57,9 +57,16 @@ The main code is in [mcp/vespo-patched](mcp/vespo-patched/) directory:
 - **Dockerfile** - Container configuration
 
 ### Setup Scripts
+
 - **setup-codex-vespo.js** - Main automated setup (Node.js)
-- **setup-codex-vespo-mac.sh** - macOS/Linux wrapper
-- **setup-codex-vespo.ps1** - Windows wrapper
+- **setup-codex-vespo-mac.sh** - macOS/Linux setup wrapper
+- **setup-codex-vespo.ps1** - Windows setup wrapper
+
+### Uninstall Scripts
+
+- **uninstall-codex-vespo.js** - Main automated uninstall (Node.js)
+- **uninstall-codex-vespo-mac.sh** - macOS/Linux uninstall wrapper
+- **uninstall-codex-vespo.ps1** - Windows uninstall wrapper
 
 ### Documentation
 - **[README.md](mcp/vespo-patched/README.md)** - Complete installation and usage guide
@@ -136,19 +143,22 @@ ChromaMcp-vespo/
 ├── .gitignore                         # Git ignore rules
 │
 └── mcp/
-    └── vespo-patched/                 # Main application
-        ├── README.md                  # Detailed guide
-        ├── setup-codex-vespo.js      # Automated setup
-        ├── setup-codex-vespo-mac.sh  # macOS installer
-        ├── setup-codex-vespo.ps1     # Windows installer
-        ├── index.js                   # MCP server
-        ├── batch-processor.js         # Batch operations
-        ├── exif-extractor.js          # Photo metadata
-        ├── watch-folder.js            # Folder monitoring
-        ├── duplicate-detector.js      # Duplicate detection
-        ├── package.json               # Dependencies
-        ├── Dockerfile                 # Container setup
-        └── .env.example               # Config template
+    └── vespo-patched/                     # Main application
+        ├── README.md                      # Detailed guide
+        ├── setup-codex-vespo.js          # Automated setup
+        ├── setup-codex-vespo-mac.sh      # macOS installer
+        ├── setup-codex-vespo.ps1         # Windows installer
+        ├── uninstall-codex-vespo.js      # Automated uninstall
+        ├── uninstall-codex-vespo-mac.sh  # macOS uninstaller
+        ├── uninstall-codex-vespo.ps1     # Windows uninstaller
+        ├── index.js                       # MCP server
+        ├── batch-processor.js             # Batch operations
+        ├── exif-extractor.js              # Photo metadata
+        ├── watch-folder.js                # Folder monitoring
+        ├── duplicate-detector.js          # Duplicate detection
+        ├── package.json                   # Dependencies
+        ├── Dockerfile                     # Container setup
+        └── .env.example                   # Config template
 ```
 
 ---

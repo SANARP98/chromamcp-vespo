@@ -267,6 +267,46 @@ You: Compare files /workspace/file1.jpg and /workspace/file2.jpg
 
 ---
 
+## Uninstallation
+
+If you want to completely remove the ChromaDB MCP Server setup:
+
+### Uninstall on macOS/Linux
+
+```bash
+cd mcp/vespo-patched
+./uninstall-codex-vespo-mac.sh
+```
+
+### Uninstall on Windows
+
+```powershell
+cd mcp\vespo-patched
+.\uninstall-codex-vespo.ps1
+```
+
+### What Gets Removed
+
+The uninstall script will prompt you to:
+
+1. **Remove Docker Containers** (default: Yes)
+   - `chromadb-vespo`
+   - `chromadb-mcp-server`
+
+2. **Remove Docker Images** (default: No)
+   - `chroma-mcp-vespo-patched:latest`
+   - `chromadb/chroma:latest`
+
+**Always removed (no prompt):**
+
+- Docker network `chroma-net`
+- Docker wrapper script `~/.codex/docker-wrapper.sh`
+- Codex CLI configuration for ChromaDB MCP
+
+**After uninstall:** Restart VS Code to apply Codex CLI configuration changes.
+
+---
+
 ## Troubleshooting
 
 ### Issue: "handshaking with MCP server failed"
