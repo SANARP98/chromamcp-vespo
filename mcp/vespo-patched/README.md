@@ -153,13 +153,20 @@ The automated setup script (`setup-codex-vespo.js`) performs these steps:
 4. ✅ Finds available port (starting from 8003)
 5. ✅ Starts ChromaDB container
 6. ✅ Builds the patched MCP server image
-7. ✅ Configures Codex CLI (`~/.codex/config.toml`)
-8. ✅ Tests MCP handshake
-9. ✅ Verifies registration with `codex mcp list`
+7. ✅ **Creates dynamic workspace wrapper script** (`~/.codex/docker-wrapper.sh` or `docker-wrapper.ps1`)
+8. ✅ Configures Codex CLI (`~/.codex/config.toml`) with dynamic mounting
+9. ✅ Tests MCP handshake
+10. ✅ Verifies registration with `codex mcp list`
+
+**Dynamic Workspace Mounting (Key Feature):**
+- The setup creates a wrapper script that **automatically mounts your current directory**
+- Works from **any directory** - not hardcoded to a single path
+- When you run `codex` from any folder, that folder becomes `/workspace` in the MCP server
+- Enables seamless work across multiple projects and directories
 
 **Platform-specific handling:**
-- **Windows**: Uses PowerShell-compatible paths (`C:\\Users\\...`)
-- **macOS/Linux**: Uses Unix paths (`/Users/...` or `/home/...`)
+- **Windows**: Uses PowerShell wrapper (`docker-wrapper.ps1`) with path conversion
+- **macOS/Linux**: Uses Bash wrapper (`docker-wrapper.sh`) with direct mounting
 
 ---
 
@@ -188,7 +195,65 @@ docker build -t chroma-mcp-vespo-patched:latest .
 
 ### 3. Configure Codex CLI
 
-Edit `~/.codex/config.toml`:
+**Recommended: Dynamic Workspace Mounting**
+
+For the setup script's approach (works from any directory), create the wrapper script and use it in your config:
+
+**macOS/Linux** - Create `~/.codex/docker-wrapper.sh`:
+```bash
+#!/bin/bash
+# See setup-codex-vespo.js lines 333-384 for full script content
+```
+
+Then in `~/.codex/config.toml`:
+```toml
+[mcp_servers.chromadb_context_vespo]
+command = "/Users/yourusername/.codex/docker-wrapper.sh"
+args = [
+  "run", "--rm", "-i",
+  "--name", "chromadb-mcp-server",
+  "--network", "chroma-net",
+  "-e", "CHROMA_URL=http://chromadb-vespo:8000",
+  "-e", "CHROMADB_URL=http://chromadb-vespo:8000",
+  "-v", "PLACEHOLDER:/workspace:ro",
+  "chroma-mcp-vespo-patched:latest"
+]
+env_vars = ["PWD"]
+startup_timeout_sec = 45
+tool_timeout_sec = 180
+enabled = true
+```
+
+**Windows** - Create `C:\Users\yourusername\.codex\docker-wrapper.ps1`:
+```powershell
+# See setup-codex-vespo.js lines 257-330 for full script content
+```
+
+Then in `~/.codex/config.toml`:
+```toml
+[mcp_servers.chromadb_context_vespo]
+command = "powershell.exe"
+args = [
+  "-NoProfile",
+  "-ExecutionPolicy", "Bypass",
+  "-File", "C:\\Users\\yourusername\\.codex\\docker-wrapper.ps1",
+  "run", "--rm", "-i",
+  "--name", "chromadb-mcp-server",
+  "--network", "chroma-net",
+  "-e", "CHROMA_URL=http://chromadb-vespo:8000",
+  "-e", "CHROMADB_URL=http://chromadb-vespo:8000",
+  "-v", "PLACEHOLDER:/workspace:ro",
+  "chroma-mcp-vespo-patched:latest"
+]
+env_vars = ["PWD"]
+startup_timeout_sec = 45
+tool_timeout_sec = 180
+enabled = true
+```
+
+**Alternative: Hardcoded Path (Single Directory Only)**
+
+If you only work in one directory, you can use a simpler hardcoded config:
 
 **macOS/Linux:**
 ```toml
@@ -223,6 +288,8 @@ startup_timeout_sec = 45
 tool_timeout_sec = 180
 enabled = true
 ```
+
+**Note:** With hardcoded paths, the MCP server only sees files in that one directory.
 
 ### 4. Verify
 

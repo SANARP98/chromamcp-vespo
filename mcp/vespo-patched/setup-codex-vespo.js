@@ -293,21 +293,12 @@ function buildWrapperScript(codexDir) {
       '',
       '$ModifiedArgs = @()',
       '$SkipNext = $false',
-      '$SkipNextName = $false',
-      '$ContainerName = $null',
       '',
       'for ($i = 0; $i -lt $DockerArgs.Count; $i++) {',
       '    $arg = $DockerArgs[$i]',
-      '    if ($SkipNextName) {',
-      '        $SkipNextName = $false',
-      '    } elseif ($SkipNext) {',
+      '    if ($SkipNext) {',
       '        $ModifiedArgs += "${DockerPath}:/workspace:ro"',
       '        $SkipNext = $false',
-      '    } elseif ($arg -eq "--name" -and ($i + 1) -lt $DockerArgs.Count) {',
-      '        $ContainerName = $DockerArgs[$i + 1]',
-      '        $ModifiedArgs += $arg',
-      '        $ModifiedArgs += $ContainerName',
-      '        $SkipNextName = $true',
       '    } elseif ($arg -eq "-v") {',
       '        $ModifiedArgs += $arg',
       '        $SkipNext = $true',
@@ -316,10 +307,6 @@ function buildWrapperScript(codexDir) {
       '    } else {',
       '        $ModifiedArgs += $arg',
       '    }',
-      '}',
-      '',
-      'if ($ContainerName) {',
-      '    & $DockerBin rm -f $ContainerName | Out-Null',
       '}',
       '',
       '& $DockerBin @ModifiedArgs',
@@ -348,8 +335,6 @@ function buildWrapperScript(codexDir) {
     '',
     'ARGS=()',
     'SKIP_NEXT=false',
-    'SKIP_NEXT_NAME=false',
-    'CONTAINER_NAME=""',
     '',
     'for arg in "$@"; do',
     '  if [ "$SKIP_NEXT" = true ]; then',
@@ -358,23 +343,12 @@ function buildWrapperScript(codexDir) {
     '  elif [[ "$arg" == "-v" ]]; then',
     '    ARGS+=("$arg")',
     '    SKIP_NEXT=true',
-    '  elif [[ "$arg" == "--name" ]]; then',
-    '    ARGS+=("$arg")',
-    '    SKIP_NEXT_NAME=true',
-    '  elif [ "$SKIP_NEXT_NAME" = true ]; then',
-    '    CONTAINER_NAME="$arg"',
-    '    ARGS+=("$arg")',
-    '    SKIP_NEXT_NAME=false',
     '  elif [[ "$arg" == *":/workspace:ro" ]]; then',
     '    ARGS+=("${WORKSPACE_DIR}:/workspace:ro")',
     '  else',
     '    ARGS+=("$arg")',
     '  fi',
     'done',
-    '',
-    'if [ -n "$CONTAINER_NAME" ]; then',
-    '  "$DOCKER_BIN" rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true',
-    'fi',
     '',
     'exec "$DOCKER_BIN" "${ARGS[@]}"',
     ''
@@ -502,11 +476,11 @@ async function main() {
     : '';
   const cleanedConfig = stripServerConfig(existingConfig, CONFIG.serverName);
 
-  const mcpContainerName = 'chromadb-mcp-server';
+  // Note: No --name flag to allow multiple concurrent Codex sessions
+  // Docker will auto-generate unique names with --rm flag
   let command = wrapperPath;
   let args = [
     'run', '--rm', '-i',
-    '--name', mcpContainerName,
     '--network', CONFIG.networkName,
     '-e', `CHROMA_URL=http://${CONFIG.containerName}:8000`,
     '-e', `CHROMADB_URL=http://${CONFIG.containerName}:8000`,
@@ -514,7 +488,7 @@ async function main() {
     CONFIG.imageName
   ];
   let envVars = ['PWD'];
-  let extraComment = 'Uses dynamic workspace mounting';
+  let extraComment = 'Uses dynamic workspace mounting (supports multiple concurrent sessions)';
 
   if (IS_WINDOWS) {
     command = 'powershell.exe';
