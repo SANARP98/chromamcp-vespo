@@ -297,7 +297,13 @@ function buildWrapperScript(codexDir) {
       'for ($i = 0; $i -lt $DockerArgs.Count; $i++) {',
       '    $arg = $DockerArgs[$i]',
       '    if ($SkipNext) {',
-      '        $ModifiedArgs += "${DockerPath}:/workspace:ro"',
+      '        # Only replace PLACEHOLDER or existing workspace mounts',
+      '        if ($arg -like "*PLACEHOLDER*" -or $arg -like "*:/workspace:ro" -or $arg -like "*://workspace:ro") {',
+      '            $ModifiedArgs += "${DockerPath}:/workspace:ro"',
+      '        } else {',
+      '            # Pass through other volume mounts unchanged',
+      '            $ModifiedArgs += $arg',
+      '        }',
       '        $SkipNext = $false',
       '    } elseif ($arg -eq "-v") {',
       '        $ModifiedArgs += $arg',
@@ -338,7 +344,13 @@ function buildWrapperScript(codexDir) {
     '',
     'for arg in "$@"; do',
     '  if [ "$SKIP_NEXT" = true ]; then',
-    '    ARGS+=("${WORKSPACE_DIR}:/workspace:ro")',
+    '    # Only replace PLACEHOLDER or existing workspace mounts',
+    '    if [[ "$arg" == *"PLACEHOLDER"* ]] || [[ "$arg" == *":/workspace:ro" ]]; then',
+    '      ARGS+=("${WORKSPACE_DIR}:/workspace:ro")',
+    '    else',
+    '      # Pass through other volume mounts unchanged',
+    '      ARGS+=("$arg")',
+    '    fi',
     '    SKIP_NEXT=false',
     '  elif [[ "$arg" == "-v" ]]; then',
     '    ARGS+=("$arg")',
@@ -438,22 +450,66 @@ async function main() {
   await ensureDockerNetwork(CONFIG.networkName);
   const chromaPort = await findFreePort(CONFIG.chromaStartPort, CONFIG.chromaPortTries);
 
-  removeContainerIfExists(CONFIG.containerName);
+  // Check if container already exists
+  const existing = runCommand('docker', ['ps', '-a', '--filter', `name=^${CONFIG.containerName}$`, '--format', '{{.Names}}'], { allowFail: true });
+  if (existing.stdout?.trim()) {
+    const isRunning = runCommand('docker', ['ps', '--filter', `name=^${CONFIG.containerName}$`, '--format', '{{.Names}}'], { allowFail: true });
 
-  runCommand('docker', [
-    'run', '-d',
-    '--name', CONFIG.containerName,
-    '--network', CONFIG.networkName,
-    '-p', `${chromaPort}:8000`,
-    'chromadb/chroma:latest'
-  ], { stdio: 'inherit' });
+    if (isRunning.stdout?.trim()) {
+      logInfo('ChromaDB container already running. Verifying health...');
+      try {
+        await waitForChroma(chromaPort, CONFIG.chromaReadySeconds);
+        logInfo('✓ Existing ChromaDB container is healthy. Skipping container recreation.');
+      } catch (error) {
+        logWarn(`Existing container is unhealthy: ${error.message}`);
+        const shouldRestart = await confirm('Restart the existing container?', true);
+        if (shouldRestart) {
+          runCommand('docker', ['restart', CONFIG.containerName], { stdio: 'inherit' });
+          await waitForChroma(chromaPort, CONFIG.chromaReadySeconds);
+        }
+      }
+    } else {
+      const shouldRemove = await confirm(
+        `ChromaDB container exists but is stopped. Remove and recreate (recommended for updates)?`,
+        true
+      );
+      if (shouldRemove) {
+        removeContainerIfExists(CONFIG.containerName);
+      } else {
+        logInfo('Starting existing container...');
+        runCommand('docker', ['start', CONFIG.containerName], { stdio: 'inherit' });
+        await waitForChroma(chromaPort, CONFIG.chromaReadySeconds);
+        logInfo('✓ Existing container started successfully.');
+      }
+    }
+  }
 
-  logInfo(`ChromaDB container started on port ${chromaPort}. Waiting for readiness...`);
+  // Only create new container if none exists or user chose to remove
+  const stillExists = runCommand('docker', ['ps', '-a', '--filter', `name=^${CONFIG.containerName}$`, '--format', '{{.Names}}'], { allowFail: true });
+  if (!stillExists.stdout?.trim()) {
+    runCommand('docker', [
+      'run', '-d',
+      '--name', CONFIG.containerName,
+      '--network', CONFIG.networkName,
+      '--restart', 'unless-stopped',
+      '-p', `${chromaPort}:8000`,
+      '-v', 'chromadb-vespo-data:/chroma/chroma',
+      '-e', 'PERSIST_DIRECTORY=/chroma/chroma',
+      '-e', 'IS_PERSISTENT=TRUE',
+      'chromadb/chroma:0.5.23'
+    ], { stdio: 'inherit' });
 
-  try {
-    await waitForChroma(chromaPort, CONFIG.chromaReadySeconds);
-  } catch (error) {
-    logWarn(error.message);
+    logInfo(`ChromaDB container started on port ${chromaPort}. Waiting for readiness...`);
+
+    try {
+      await waitForChroma(chromaPort, CONFIG.chromaReadySeconds);
+      logInfo('✓ ChromaDB is ready and responding to health checks.');
+    } catch (error) {
+      logError(`ChromaDB health check failed: ${error.message}`);
+      logError('Cleaning up failed container...');
+      removeContainerIfExists(CONFIG.containerName);
+      throw new Error('Setup aborted: ChromaDB did not start successfully.');
+    }
   }
 
   buildImage(patchedPath, CONFIG.imageName);

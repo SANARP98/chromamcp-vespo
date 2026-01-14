@@ -107,8 +107,15 @@ class ChromaContextMCP {
 
   async getLocalClient() {
     if (!this.localClient) {
+      const chromaUrl = process.env.CHROMA_URL || process.env.CHROMADB_URL;
+
+      if (!chromaUrl) {
+        console.error('WARNING: CHROMA_URL/CHROMADB_URL not set. Using fallback: http://chromadb-vespo:8000');
+        console.error('If connection fails, ensure environment variables are configured correctly.');
+      }
+
       this.localClient = new ChromaClient({
-        path: process.env.CHROMA_URL || process.env.CHROMADB_URL || 'http://localhost:8001'
+        path: chromaUrl || 'http://chromadb-vespo:8000'
       });
     }
     return this.localClient;
