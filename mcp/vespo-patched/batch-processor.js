@@ -310,7 +310,21 @@ export async function scanDirectory(dirPath, options = {}) {
     extensions = null, // null = all, or array like ['.jpg', '.png']
     categories = null, // null = all, or array like ['images', 'cad']
     maxFiles = 10000,
-    excludePatterns = [/node_modules/, /\.git/, /\.DS_Store/, /__pycache__/]
+    excludePatterns = [
+      /node_modules/,
+      /\.git/,
+      /\.DS_Store/,
+      /__pycache__/,
+      /\.venv/,
+      /\.env$/,
+      /\.log$/,
+      /\.log\.\d+$/,
+      /\.db$/,
+      /\.sqlite$/,
+      /\.cache/,
+      /\.pyc$/,
+      /logs\//
+    ]
   } = options;
 
   const files = [];

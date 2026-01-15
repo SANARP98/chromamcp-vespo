@@ -53,6 +53,65 @@ function isWorkspacePath(targetPath) {
   return targetPath === WORKSPACE_ROOT || targetPath.startsWith(`${WORKSPACE_ROOT}/`);
 }
 
+/**
+ * Translate host paths to container workspace paths.
+ * When Codex passes "/Users/foo/myproject", we need to translate it to "/workspace"
+ * since that's where the host directory is mounted in the container.
+ *
+ * The wrapper script injects HOST_WORKSPACE env var with the original host path.
+ *
+ * Handles:
+ * - Absolute host paths: /Users/foo/project -> /workspace
+ * - Relative paths: ".", "./src", "src" -> /workspace, /workspace/src
+ * - Already workspace paths: /workspace/src -> /workspace/src
+ */
+function translateToWorkspacePath(inputPath) {
+  // Handle relative paths (., ./, ./subdir, subdir)
+  if (inputPath === '.' || inputPath === './') {
+    return WORKSPACE_ROOT;
+  }
+
+  if (inputPath.startsWith('./')) {
+    // ./src -> /workspace/src
+    return WORKSPACE_ROOT + inputPath.slice(1);
+  }
+
+  // Handle paths that don't start with / (relative paths without ./)
+  if (!inputPath.startsWith('/')) {
+    // src -> /workspace/src
+    return `${WORKSPACE_ROOT}/${inputPath}`;
+  }
+
+  // Already a workspace path
+  if (isWorkspacePath(inputPath)) {
+    return inputPath;
+  }
+
+  // Get the host workspace from HOST_WORKSPACE environment (set by wrapper script)
+  const hostWorkspace = process.env.HOST_WORKSPACE;
+
+  if (!hostWorkspace) {
+    // No HOST_WORKSPACE set - can't translate, use /workspace as fallback
+    console.error('WARNING: HOST_WORKSPACE not set, cannot translate host path. Using /workspace as fallback.');
+    return WORKSPACE_ROOT;
+  }
+
+  // Check if the input path matches or is under the host workspace
+  if (inputPath === hostWorkspace) {
+    return WORKSPACE_ROOT;
+  }
+
+  if (inputPath.startsWith(hostWorkspace + '/')) {
+    // Translate subpath: /Users/foo/myproject/src -> /workspace/src
+    const relativePath = inputPath.slice(hostWorkspace.length);
+    return WORKSPACE_ROOT + relativePath;
+  }
+
+  // Path doesn't match host workspace - might be trying to access outside mounted area
+  console.error(`WARNING: Path "${inputPath}" is outside mounted workspace "${hostWorkspace}". Using /workspace.`);
+  return WORKSPACE_ROOT;
+}
+
 async function getWorkspaceMountInfo() {
   const info = {
     workspacePath: WORKSPACE_ROOT,
@@ -508,16 +567,18 @@ class ChromaContextMCP {
             recursive = true,
             categories = null,
             extensions = null,
-            max_files = 500,
+            max_files = 100,  // Reduced default for faster response, user can increase if needed
             include_content = true
           } = args;
 
           try {
-            const workspaceInfo = isWorkspacePath(dirPath) ? await getWorkspaceMountInfo() : null;
-            debugLog(`Scanning ${dirPath}...`);
+            // Translate host paths (e.g., /Users/foo/project) to container paths (/workspace)
+            const effectivePath = translateToWorkspacePath(dirPath);
+            const workspaceInfo = await getWorkspaceMountInfo();
+            debugLog(`Input path: ${dirPath} -> Effective path: ${effectivePath}`);
 
             // Scan for files
-            const files = await scanDirectory(dirPath, {
+            const files = await scanDirectory(effectivePath, {
               recursive,
               categories: categories ? categories.split(',').map(c => c.trim()) : null,
               extensions: extensions ? extensions.split(',').map(e => e.trim().startsWith('.') ? e.trim() : `.${e.trim()}`) : null,
@@ -530,7 +591,7 @@ class ChromaContextMCP {
             const { results, errors, stats } = await batchProcessFiles(files, {
               concurrency: 10,
               includeContent: include_content,
-              basePath: dirPath,
+              basePath: effectivePath,
               onProgress: (p) => {
                 if (p.processed % 50 === 0) {
                   debugLog(`Progress: ${p.percent}% (${p.processed}/${p.total})`);
@@ -607,13 +668,15 @@ class ChromaContextMCP {
           } = args;
 
           try {
-            const workspaceInfo = isWorkspacePath(dirPath) ? await getWorkspaceMountInfo() : null;
+            // Translate host paths to container paths
+            const effectivePath = translateToWorkspacePath(dirPath);
+            const workspaceInfo = await getWorkspaceMountInfo();
             // Create temp collection name
             const tempName = name || `temp_${Date.now()}`;
-            debugLog(`Quick loading to collection: ${tempName}`);
+            debugLog(`Quick loading to collection: ${tempName} (path: ${dirPath} -> ${effectivePath})`);
 
             // Scan and process
-            const files = await scanDirectory(dirPath, {
+            const files = await scanDirectory(effectivePath, {
               recursive: true,
               categories: categories ? categories.split(',').map(c => c.trim()) : null,
               extensions: extensions ? extensions.split(',').map(e => e.trim().startsWith('.') ? e.trim() : `.${e.trim()}`) : null,
@@ -623,7 +686,7 @@ class ChromaContextMCP {
             const { results, stats } = await batchProcessFiles(files, {
               concurrency: 20, // Higher concurrency for speed
               includeContent: true,
-              basePath: dirPath
+              basePath: effectivePath
             });
 
             // Store quickly
