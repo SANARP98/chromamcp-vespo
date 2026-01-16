@@ -6,7 +6,14 @@
 
 ## Quick Start
 
-### Requirements
+### Step 1: Clone the Repository
+
+```bash
+git clone https://github.com/SANARP98/chromamcp-vespo.git
+cd chromamcp-vespo
+```
+
+### Step 2: Requirements
 
 Before installing, ensure you have:
 
@@ -23,23 +30,220 @@ Before installing, ensure you have:
 
 ## Installation
 
-### macOS/Linux
+> **Note:** If you have a previous installation, run the uninstall script first. During uninstall, you'll be asked whether to keep or remove existing data - select **Yes** or **No** based on your preference.
 
+### Uninstall Previous Installation (if applicable)
+
+**macOS/Linux:**
+```bash
+cd mcp/vespo-patched
+./uninstall-codex-vespo-mac.sh
+```
+
+**Windows:**
+```powershell
+cd mcp\vespo-patched
+.\uninstall-codex-vespo.ps1
+```
+
+### Fresh Install
+
+**macOS/Linux:**
 ```bash
 cd mcp/vespo-patched
 ./setup-codex-vespo-mac.sh
 ```
 
-### Windows
-
+**Windows:**
 ```powershell
 cd mcp\vespo-patched
 .\setup-codex-vespo.ps1
 ```
 
-**After installation:**
-1. Restart VS Code completely
-2. Open Codex and test: `List chroma collections`
+---
+
+## Post-Installation: IMPORTANT
+
+After installation, you **MUST** restart your environment:
+
+### For VS Code Users:
+1. **Exit VS Code completely** (File → Exit, not just close the window)
+2. **Reopen VS Code**
+3. **Close all terminal windows** and open a fresh terminal
+
+### For Terminal Users:
+1. **Close your terminal completely**
+2. **Open a new terminal session**
+
+### Then:
+Navigate to the repository you want to index and run Codex:
+```bash
+cd /path/to/your/project
+codex
+```
+
+Test that it's working:
+```
+List chroma collections
+```
+
+---
+
+## Prompt Examples
+
+Here are example prompts you can use with Codex to ingest, index, and retrieve data.
+
+> **Note:** The collection name is automatically set to your repository/folder name, so you don't need to specify it manually.
+
+### Ingesting Files
+
+```
+Ingest all files from the current directory
+```
+
+```
+Batch ingest all JavaScript files from ./src
+```
+
+```
+Ingest the file ./README.md
+```
+
+```
+Scan this directory and tell me what files can be ingested
+```
+
+```
+Quick load all Python files from ./scripts for searching
+```
+
+```
+Ingest all .ts and .tsx files recursively
+```
+
+### Indexing & Managing Collections
+
+```
+List all chroma collections
+```
+
+```
+Get info about the current collection
+```
+
+```
+Export the current collection to a JSON backup file
+```
+
+```
+Import collection from ./backup/my-project.json
+```
+
+```
+Delete the current collection
+```
+
+```
+Find duplicates in the current collection
+```
+
+### Searching & Retrieving
+
+```
+Search for "authentication logic"
+```
+
+```
+Find similar patterns to "async function fetchData"
+```
+
+```
+Search for code that handles user login
+```
+
+```
+Find all references to database connections
+```
+
+```
+Search for error handling patterns
+```
+
+```
+Find code similar to this function: [paste your code]
+```
+
+```
+How does the API handle errors?
+```
+
+```
+Where is the user session managed?
+```
+
+### Photo & EXIF Operations
+
+```
+Extract EXIF data from ./photos/image.jpg
+```
+
+```
+Ingest all photos from ./images with EXIF metadata extraction
+```
+
+```
+Find all photos taken with a Canon camera
+```
+
+### Watch Folders
+
+```
+Watch the folder ./incoming for new files and auto-ingest them
+```
+
+```
+List all active folder watchers
+```
+
+```
+Stop watching the folder ./incoming
+```
+
+### Duplicate Detection
+
+```
+Find duplicate files in ./documents
+```
+
+```
+Compare ./file1.txt and ./file2.txt to check if they are duplicates
+```
+
+```
+Find duplicate entries in the current collection
+```
+
+### Advanced Queries
+
+```
+Ingest all files from ./src excluding node_modules, then search for "API endpoint"
+```
+
+```
+Ingest all .tsx and .css files from ./app
+```
+
+```
+Search across all collections for "database migration"
+```
+
+```
+Find code patterns similar to React hooks
+```
+
+```
+What design patterns are used in this codebase?
+```
 
 ---
 
@@ -76,13 +280,13 @@ The main code is in [mcp/vespo-patched](mcp/vespo-patched/) directory:
 
 ## Features
 
-✅ **22 MCP Tools** for ChromaDB operations
-✅ **Batch Processing** - Ingest 500+ files at once
-✅ **Photo EXIF** - Extract camera, GPS, date metadata
-✅ **Watch Folders** - Auto-ingest new files
-✅ **Duplicate Detection** - Find duplicate files by hash
-✅ **77 File Types** - Code, documents, photos, CAD files, etc.
-✅ **Codex CLI Compatible** - Works with ChatGPT in VS Code
+- **22 MCP Tools** for ChromaDB operations
+- **Batch Processing** - Ingest 500+ files at once
+- **Photo EXIF** - Extract camera, GPS, date metadata
+- **Watch Folders** - Auto-ingest new files
+- **Duplicate Detection** - Find duplicate files by hash
+- **77 File Types** - Code, documents, photos, CAD files, etc.
+- **Codex CLI Compatible** - Works with ChatGPT in VS Code
 
 ---
 
@@ -131,14 +335,14 @@ The main code is in [mcp/vespo-patched](mcp/vespo-patched/) directory:
 
 For detailed setup instructions, troubleshooting, and usage examples, see:
 
-👉 **[Complete Guide](mcp/vespo-patched/README.md)**
+**[Complete Guide](mcp/vespo-patched/README.md)**
 
 ---
 
 ## Project Structure
 
 ```
-ChromaMcp-vespo/
+chromamcp-vespo/
 ├── README.md                          # This file
 ├── .gitignore                         # Git ignore rules
 │
