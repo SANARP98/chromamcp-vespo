@@ -12,8 +12,11 @@ const CONFIG = {
   mcpContainerName: 'chromadb-mcp-server',
   imageName: 'chroma-mcp-vespo-patched:latest',
   chromaImageName: 'chromadb/chroma:latest',
+  chromaImagePinned: 'chromadb/chroma:0.5.23',
+  volumeName: 'chromadb-vespo-data',
   serverName: 'chromadb_context_vespo',
-  dockerWrapperPath: path.join(os.homedir(), '.codex', 'docker-wrapper.sh'),
+  dockerWrapperPathUnix: path.join(os.homedir(), '.codex', 'docker-wrapper.sh'),
+  dockerWrapperPathWindows: path.join(os.homedir(), '.codex', 'docker-wrapper.ps1'),
   configPath: path.join(os.homedir(), '.codex', 'config.toml')
 };
 
@@ -100,6 +103,43 @@ function networkExists(name) {
   }
 }
 
+function volumeExists(name) {
+  try {
+    const result = runCommand('docker', ['volume', 'ls', '--format', '{{.Name}}']);
+    return result.stdout.split('\n').includes(name);
+  } catch {
+    return false;
+  }
+}
+
+function findOrphanedMcpContainers() {
+  // Find containers created from the MCP image that may have auto-generated names
+  try {
+    const result = runCommand('docker', [
+      'ps', '-a',
+      '--filter', 'ancestor=chroma-mcp-vespo-patched:latest',
+      '--format', '{{.Names}}'
+    ]);
+    return result.stdout.split('\n').filter(name => name.trim() !== '');
+  } catch {
+    return [];
+  }
+}
+
+function findOrphanedChromaContainers() {
+  // Find chromadb containers that might have different names
+  try {
+    const result = runCommand('docker', [
+      'ps', '-a',
+      '--filter', 'ancestor=chromadb/chroma',
+      '--format', '{{.Names}}'
+    ]);
+    return result.stdout.split('\n').filter(name => name.trim() !== '');
+  } catch {
+    return [];
+  }
+}
+
 function stopAndRemoveContainer(name) {
   if (!containerExists(name)) {
     logInfo(`Container '${name}' not found, skipping.`);
@@ -147,17 +187,48 @@ function removeNetwork(name) {
   }
 }
 
-function removeDockerWrapper() {
-  if (!fs.existsSync(CONFIG.dockerWrapperPath)) {
-    logInfo('Docker wrapper script not found, skipping.');
+function removeVolume(name) {
+  if (!volumeExists(name)) {
+    logInfo(`Volume '${name}' not found, skipping.`);
     return;
   }
 
   try {
-    fs.unlinkSync(CONFIG.dockerWrapperPath);
-    logSuccess('Docker wrapper script removed.');
+    logInfo(`Removing volume '${name}'...`);
+    runCommand('docker', ['volume', 'rm', name]);
+    logSuccess(`Volume '${name}' removed.`);
   } catch (error) {
-    logWarn(`Failed to remove docker wrapper: ${error.message}`);
+    logWarn(`Failed to remove volume '${name}': ${error.message}`);
+  }
+}
+
+function removeDockerWrapper() {
+  let removed = false;
+
+  // Try to remove Unix wrapper
+  if (fs.existsSync(CONFIG.dockerWrapperPathUnix)) {
+    try {
+      fs.unlinkSync(CONFIG.dockerWrapperPathUnix);
+      logSuccess('Docker wrapper script (bash) removed.');
+      removed = true;
+    } catch (error) {
+      logWarn(`Failed to remove bash wrapper: ${error.message}`);
+    }
+  }
+
+  // Try to remove Windows wrapper
+  if (fs.existsSync(CONFIG.dockerWrapperPathWindows)) {
+    try {
+      fs.unlinkSync(CONFIG.dockerWrapperPathWindows);
+      logSuccess('Docker wrapper script (PowerShell) removed.');
+      removed = true;
+    } catch (error) {
+      logWarn(`Failed to remove PowerShell wrapper: ${error.message}`);
+    }
+  }
+
+  if (!removed) {
+    logInfo('Docker wrapper scripts not found, skipping.');
   }
 }
 
@@ -169,26 +240,34 @@ function cleanCodexConfig() {
 
   try {
     let config = fs.readFileSync(CONFIG.configPath, 'utf-8');
+    const originalConfig = config;
 
     // Find and remove the chromadb_context_vespo section
+    // Support multiple possible markers/formats from different versions
     const startMarkers = [
       '# Patched vespo92 ChromaDB MCP server',
-      '[mcp_servers.chromadb_context_vespo]'
+      '# ChromaDB MCP Server',
+      '[mcp_servers.chromadb_context_vespo]',
+      '[mcp_servers.chromadb-vespo]',
+      '[mcp_servers.chromadb_vespo]'
     ];
 
     let modified = false;
     for (const marker of startMarkers) {
-      const startIdx = config.indexOf(marker);
-      if (startIdx !== -1) {
+      let startIdx = config.indexOf(marker);
+      while (startIdx !== -1) {
         // Find the start of the section (including comments above)
         let sectionStart = startIdx;
         const lines = config.substring(0, startIdx).split('\n');
 
-        // Go back to find comment lines
+        // Go back to find comment lines that belong to this section
         for (let i = lines.length - 1; i >= 0; i--) {
           const line = lines[i].trim();
           if (line.startsWith('#') || line === '') {
-            sectionStart = config.lastIndexOf(lines[i], startIdx);
+            // Only include if it's a related comment
+            if (line.toLowerCase().includes('chroma') || line.toLowerCase().includes('vespo') || line === '') {
+              sectionStart = config.lastIndexOf(lines[i], startIdx);
+            }
           } else {
             break;
           }
@@ -204,13 +283,15 @@ function cleanCodexConfig() {
         // Remove the section
         config = config.substring(0, sectionStart) + config.substring(sectionEnd);
         modified = true;
-        break;
+
+        // Look for more occurrences
+        startIdx = config.indexOf(marker);
       }
     }
 
     if (modified) {
       // Clean up extra blank lines
-      config = config.replace(/\n{3,}/g, '\n\n');
+      config = config.replace(/\n{3,}/g, '\n\n').trim() + '\n';
 
       fs.writeFileSync(CONFIG.configPath, config, 'utf-8');
       logSuccess('Codex config cleaned.');
@@ -233,48 +314,119 @@ async function main() {
   console.log();
 
   // Check Docker
+  let dockerAvailable = true;
   try {
     runCommand('docker', ['--version']);
   } catch {
-    logError('Docker is not installed or not in PATH.');
-    process.exit(1);
+    logWarn('Docker is not installed or not in PATH. Skipping Docker cleanup.');
+    dockerAvailable = false;
   }
 
-  // Prompt for containers
-  const removeContainers = await confirm(
-    'Remove Docker containers (chromadb-vespo, chromadb-mcp-server)?',
-    true
-  );
+  let removeContainers = false;
+  let removeImages = false;
+  let removeVolumes = false;
+  let orphanedMcpContainers = [];
+  let orphanedChromaContainers = [];
 
-  if (removeContainers) {
+  if (dockerAvailable) {
+    // Find orphaned containers (auto-named from multi-workspace setup)
+    orphanedMcpContainers = findOrphanedMcpContainers();
+    orphanedChromaContainers = findOrphanedChromaContainers();
+
+    // Show what we found
+    console.log();
+    logInfo('=== Detected Components ===');
+
+    const knownContainers = [];
+    if (containerExists(CONFIG.containerName)) knownContainers.push(CONFIG.containerName);
+    if (containerExists(CONFIG.mcpContainerName)) knownContainers.push(CONFIG.mcpContainerName);
+
+    const allOrphanedContainers = [...new Set([...orphanedMcpContainers, ...orphanedChromaContainers])];
+
+    if (knownContainers.length > 0) {
+      logInfo(`  Known containers: ${knownContainers.join(', ')}`);
+    }
+    if (allOrphanedContainers.length > 0) {
+      logInfo(`  Additional containers (auto-named): ${allOrphanedContainers.join(', ')}`);
+    }
+    if (imageExists(CONFIG.imageName)) logInfo(`  Image: ${CONFIG.imageName}`);
+    if (imageExists(CONFIG.chromaImageName)) logInfo(`  Image: ${CONFIG.chromaImageName}`);
+    if (imageExists(CONFIG.chromaImagePinned)) logInfo(`  Image: ${CONFIG.chromaImagePinned}`);
+    if (volumeExists(CONFIG.volumeName)) logInfo(`  Volume: ${CONFIG.volumeName} (contains your indexed data)`);
+    if (networkExists(CONFIG.networkName)) logInfo(`  Network: ${CONFIG.networkName}`);
+
+    // Prompt for containers
+    const totalContainers = knownContainers.length + allOrphanedContainers.length;
+    if (totalContainers > 0) {
+      console.log();
+      removeContainers = await confirm(
+        `Remove Docker containers (${totalContainers} found)?`,
+        true
+      );
+    }
+
+    // Prompt for images
+    const hasImages = imageExists(CONFIG.imageName) || imageExists(CONFIG.chromaImageName) || imageExists(CONFIG.chromaImagePinned);
+    if (hasImages) {
+      console.log();
+      removeImages = await confirm(
+        'Remove Docker images (chroma-mcp-vespo-patched, chromadb/chroma)?',
+        false
+      );
+    }
+
+    // Prompt for volumes (important - contains data!)
+    if (volumeExists(CONFIG.volumeName)) {
+      console.log();
+      logWarn('The ChromaDB volume contains all your indexed data (collections, embeddings).');
+      removeVolumes = await confirm(
+        'Remove ChromaDB data volume? (WARNING: This deletes all indexed data!)',
+        false
+      );
+    }
+  }
+
+  if (dockerAvailable && removeContainers) {
     console.log();
     logInfo('=== Removing Docker Containers ===');
+
+    // Remove known containers
     stopAndRemoveContainer(CONFIG.containerName);
     stopAndRemoveContainer(CONFIG.mcpContainerName);
+
+    // Remove orphaned containers
+    const allOrphanedContainers = [...new Set([...orphanedMcpContainers, ...orphanedChromaContainers])];
+    for (const container of allOrphanedContainers) {
+      if (container !== CONFIG.containerName && container !== CONFIG.mcpContainerName) {
+        stopAndRemoveContainer(container);
+      }
+    }
   }
 
-  // Prompt for images
-  console.log();
-  const removeImages = await confirm(
-    'Remove Docker images (chroma-mcp-vespo-patched, chromadb/chroma)?',
-    false
-  );
-
-  if (removeImages) {
+  if (dockerAvailable && removeImages) {
     console.log();
     logInfo('=== Removing Docker Images ===');
     removeImage(CONFIG.imageName);
     removeImage(CONFIG.chromaImageName);
+    removeImage(CONFIG.chromaImagePinned);
+  }
+
+  if (dockerAvailable && removeVolumes) {
+    console.log();
+    logInfo('=== Removing Docker Volume ===');
+    removeVolume(CONFIG.volumeName);
   }
 
   // Always remove network if no containers are using it
-  console.log();
-  logInfo('=== Removing Docker Network ===');
-  removeNetwork(CONFIG.networkName);
+  if (dockerAvailable) {
+    console.log();
+    logInfo('=== Removing Docker Network ===');
+    removeNetwork(CONFIG.networkName);
+  }
 
   // Always remove docker wrapper
   console.log();
-  logInfo('=== Removing Docker Wrapper Script ===');
+  logInfo('=== Removing Docker Wrapper Scripts ===');
   removeDockerWrapper();
 
   // Always clean Codex config
@@ -297,8 +449,15 @@ async function main() {
   if (removeImages) {
     console.log('  ✓ Docker images removed');
   }
-  console.log('  ✓ Docker network removed (if unused)');
-  console.log('  ✓ Docker wrapper script removed');
+  if (removeVolumes) {
+    console.log('  ✓ Docker volume removed (data deleted)');
+  } else if (volumeExists(CONFIG.volumeName)) {
+    console.log('  ⚠ Docker volume preserved (your data is still available)');
+  }
+  if (dockerAvailable) {
+    console.log('  ✓ Docker network removed (if unused)');
+  }
+  console.log('  ✓ Docker wrapper scripts removed');
   console.log('  ✓ Codex CLI configuration cleaned');
   console.log();
   logWarn('Please restart VS Code to apply Codex CLI configuration changes.');
