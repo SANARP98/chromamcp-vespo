@@ -8,6 +8,22 @@
 
 ---
 
+## Table of Contents
+
+- [What is This?](#what-is-this)
+- [Quick Start](#quick-start)
+  - [macOS Setup](#macos-setup-step-by-step)
+  - [Windows Setup](#windows-setup-step-by-step)
+- [Features](#features)
+- [Prerequisites](#prerequisites)
+- [Detailed Installation](#detailed-installation)
+- [First-Time Commands](#first-time-commands)
+- [Uninstallation](#uninstallation)
+- [Troubleshooting](#troubleshooting)
+- [FAQ](#faq)
+
+---
+
 ## What is This?
 
 This is a **patched and Codex CLI-compatible** version of [vespo92/chromadblocal-mcp-server](https://github.com/vespo92/chromadblocal-mcp-server) that works correctly with ChatGPT Codex CLI in VS Code.
@@ -15,23 +31,181 @@ This is a **patched and Codex CLI-compatible** version of [vespo92/chromadblocal
 ### Why Patched?
 
 The original server had MCP stdio protocol compliance issues:
-- ❌ `console.error()` contaminated stdio during handshake
-- ❌ Startup banners interfered with MCP initialization
-- ❌ Progress logs broke JSON-RPC messages
+
+- `console.error()` contaminated stdio during handshake
+- Startup banners interfered with MCP initialization
+- Progress logs broke JSON-RPC messages
 
 ### What We Fixed
 
-✅ All `console.error()` wrapped in `DEBUG_MCP` flag
-✅ Removed startup banners and progress logs
-✅ Clean Dockerfile using `bun index.js` (not `bun run`)
-✅ Stdio-compliant handshake for Codex CLI
-✅ Preserves all 22 advanced tools from original
+- All `console.error()` wrapped in `DEBUG_MCP` flag
+- Removed startup banners and progress logs
+- Clean Dockerfile using `bun index.js` (not `bun run`)
+- Stdio-compliant handshake for Codex CLI
+- Preserves all 22 advanced tools from original
+- **Persistent ChromaDB storage** - data survives container restarts
+- **Auto-restart policy** - ChromaDB restarts automatically
+- **Automatic collection naming** - uses repo name for easy context retrieval
+
+---
+
+## Quick Start
+
+### macOS Setup (Step-by-Step)
+
+**Prerequisites:** Make sure you have these installed before starting:
+
+1. **Docker Desktop** - Download from [docker.com](https://docker.com) and install
+2. **Git** - Usually pre-installed on macOS. Check with `git --version`
+3. **Node.js (v14+)** - Download from [nodejs.org](https://nodejs.org) or use `brew install node`
+4. **Codex CLI** - Install with `npm install -g @anthropic/codex`
+
+**Installation Steps:**
+
+```bash
+# Step 1: Open Terminal
+# Press Cmd+Space, type "Terminal", press Enter
+
+# Step 2: Navigate to where you want to clone the repo
+cd ~/Documents
+
+# Step 3: Clone the repository
+git clone https://github.com/anthropics/ChromaMcp-vespo.git
+
+# Step 4: Navigate into the cloned repo
+cd ChromaMcp-vespo
+
+# Step 5: Navigate to the vespo-patched directory
+cd mcp/vespo-patched
+
+# Step 6: Make the setup script executable
+chmod +x setup-codex-vespo-mac.sh
+
+# Step 7: Run the setup script
+./setup-codex-vespo-mac.sh
+```
+
+**What happens during setup:**
+
+- Checks all prerequisites (Docker, Node.js, Codex)
+- Creates Docker network `chroma-net`
+- Starts ChromaDB container with **persistent storage**
+- Builds the MCP server Docker image
+- Creates wrapper script at `~/.codex/docker-wrapper.sh`
+- Configures Codex CLI at `~/.codex/config.toml`
+- Tests MCP handshake
+
+**After setup completes:**
+
+```bash
+# Step 8: IMPORTANT - Completely quit and restart VS Code
+# (Cmd+Q to quit, then reopen)
+
+# Step 9: Open any project folder
+cd ~/your-project-folder
+
+# Step 10: Start Codex
+codex
+
+# Step 11: Test the MCP server
+# Type in Codex: "List chroma collections"
+```
+
+**Verify installation:**
+
+```bash
+# Check MCP server is registered
+codex mcp list
+# Should show: chromadb_context_vespo
+
+# Check ChromaDB is running
+docker ps | grep chromadb-vespo
+# Should show the running container
+```
+
+---
+
+### Windows Setup (Step-by-Step)
+
+**Prerequisites:** Make sure you have these installed before starting:
+
+1. **Docker Desktop** - Download from [docker.com](https://docker.com) and install
+   - During installation, enable WSL 2 backend
+   - After installation, ensure Docker Desktop is running (whale icon in system tray)
+2. **Git for Windows** - Download from [git-scm.com](https://git-scm.com)
+3. **Node.js (v14+)** - Download from [nodejs.org](https://nodejs.org)
+4. **Codex CLI** - Open PowerShell and run: `npm install -g @anthropic/codex`
+
+**Installation Steps:**
+
+```powershell
+# Step 1: Open PowerShell as Administrator
+# Press Windows key, type "PowerShell", right-click, "Run as Administrator"
+
+# Step 2: Navigate to where you want to clone the repo
+cd C:\Users\YourUsername\Documents
+
+# Step 3: Clone the repository
+git clone https://github.com/anthropics/ChromaMcp-vespo.git
+
+# Step 4: Navigate into the cloned repo
+cd ChromaMcp-vespo
+
+# Step 5: Navigate to the vespo-patched directory
+cd mcp\vespo-patched
+
+# Step 6: Run the setup script
+# You may need to allow script execution first:
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+# Step 7: Run the setup script
+.\setup-codex-vespo.ps1
+```
+
+**What happens during setup:**
+
+- Checks all prerequisites (Docker, Node.js, Codex)
+- Creates Docker network `chroma-net`
+- Starts ChromaDB container with **persistent storage**
+- Builds the MCP server Docker image
+- Creates wrapper script at `C:\Users\YourUsername\.codex\docker-wrapper.ps1`
+- Configures Codex CLI at `C:\Users\YourUsername\.codex\config.toml`
+- Tests MCP handshake
+
+**After setup completes:**
+
+```powershell
+# Step 8: IMPORTANT - Completely quit and restart VS Code
+# (File > Exit or Alt+F4, then reopen)
+
+# Step 9: Open any project folder
+cd C:\Users\YourUsername\your-project-folder
+
+# Step 10: Start Codex
+codex
+
+# Step 11: Test the MCP server
+# Type in Codex: "List chroma collections"
+```
+
+**Verify installation:**
+
+```powershell
+# Check MCP server is registered
+codex mcp list
+# Should show: chromadb_context_vespo
+
+# Check ChromaDB is running
+docker ps | Select-String "chromadb-vespo"
+# Should show the running container
+```
 
 ---
 
 ## Features
 
 ### Core MCP Tools
+
 - `search_context` - Vector search across collections
 - `store_context` - Store documents with metadata
 - `list_collections` - List local/remote collections
@@ -39,6 +213,7 @@ The original server had MCP stdio protocol compliance issues:
 - `get_environment` - Environment routing info
 
 ### Batch File Processing
+
 - `scan_directory` - Preview files before ingesting
 - `batch_ingest` - Bulk ingest 500+ files with metadata
 - `quick_load` - Fast temporary collection loading
@@ -51,14 +226,17 @@ The original server had MCP stdio protocol compliance issues:
 - `list_file_types` - Show 77 supported file types
 
 ### Photo & EXIF Tools
+
 - `extract_exif` - Extract camera, lens, GPS, date from photos
 
 ### Watch Folder Tools
+
 - `watch_folder` - Auto-ingest new files
 - `stop_watch` - Stop watching
 - `list_watchers` - List active watchers
 
 ### Duplicate Detection
+
 - `find_duplicates` - Find duplicate files by hash
 - `compare_files` - Compare two files
 - `find_collection_duplicates` - Find dupes in collection
@@ -85,65 +263,11 @@ Before installation, ensure you have:
 
 ---
 
-## Installation
+## Detailed Installation
 
-### macOS/Linux
+This section provides additional details for those who need more information beyond the [Quick Start](#quick-start) guide.
 
-1. **Navigate to the directory:**
-   ```bash
-   cd mcp/vespo-patched
-   ```
-
-2. **Run the setup script:**
-   ```bash
-   ./setup-codex-vespo-mac.sh
-   ```
-
-3. **Follow the prompts:**
-   - The script will check prerequisites
-   - Start ChromaDB (Docker)
-   - Build the patched MCP server
-   - Configure Codex CLI
-   - Test the handshake
-
-4. **Restart VS Code** (important!)
-
-5. **Test in Codex:**
-   ```
-   You: List chroma collections
-   You: Scan directory /workspace
-   ```
-
-### Windows
-
-1. **Navigate to the directory:**
-   ```powershell
-   cd mcp\vespo-patched
-   ```
-
-2. **Run the setup script:**
-   ```powershell
-   .\setup-codex-vespo.ps1
-   ```
-
-3. **Follow the prompts:**
-   - The script will check prerequisites
-   - Start ChromaDB (Docker)
-   - Build the patched MCP server
-   - Configure Codex CLI
-   - Test the handshake
-
-4. **Restart VS Code completely** (important!)
-
-5. **Test in Codex:**
-   ```
-   You: List chroma collections
-   You: Scan directory /workspace
-   ```
-
----
-
-## What the Setup Script Does
+### What the Setup Script Does
 
 The automated setup script (`setup-codex-vespo.js`) performs these steps:
 
@@ -159,12 +283,14 @@ The automated setup script (`setup-codex-vespo.js`) performs these steps:
 10. ✅ Verifies registration with `codex mcp list`
 
 **Dynamic Workspace Mounting (Key Feature):**
+
 - The setup creates a wrapper script that **automatically mounts your current directory**
 - Works from **any directory** - not hardcoded to a single path
 - When you run `codex` from any folder, that folder becomes `/workspace` in the MCP server
 - Enables seamless work across multiple projects and directories
 
 **Platform-specific handling:**
+
 - **Windows**: Uses PowerShell wrapper (`docker-wrapper.ps1`) with path conversion
 - **macOS/Linux**: Uses Bash wrapper (`docker-wrapper.sh`) with direct mounting
 
@@ -306,28 +432,32 @@ You should see `chromadb_context_vespo` in the list.
 After installation, test these commands in Codex:
 
 ### Basic Commands
-```
+
+```text
 You: List all MCP tools available
 You: List chroma collections
 You: Get environment info
 ```
 
 ### Index a Directory
-```
+
+```text
 You: Scan directory /workspace
 You: Batch ingest /workspace into collection my_codebase
 You: Search for authentication in my_codebase
 ```
 
 ### Work with Photos
-```
+
+```text
 You: Extract EXIF from /workspace/photo.jpg
 You: Quick load /workspace/photos (categories: images)
 You: Find photos taken with Canon in the collection
 ```
 
 ### Find Duplicates
-```
+
+```text
 You: Find duplicates in /workspace (recursive: true)
 You: Compare files /workspace/file1.jpg and /workspace/file2.jpg
 ```
@@ -369,6 +499,7 @@ The uninstall script will prompt you to:
 - Docker network `chroma-net`
 - Docker wrapper script `~/.codex/docker-wrapper.sh`
 - Codex CLI configuration for ChromaDB MCP
+- ChromaDB persistent volume (optional, prompted separately)
 
 **After uninstall:** Restart VS Code to apply Codex CLI configuration changes.
 
@@ -443,7 +574,7 @@ args = [
 
 ## Project Structure
 
-```
+```text
 vespo-patched/
 ├── README.md                      # This file
 ├── package.json                   # Dependencies
@@ -465,7 +596,7 @@ vespo-patched/
 
 ## Architecture
 
-```
+```text
 ┌─────────────────┐
 │   Codex CLI     │
 │   (VS Code)     │
@@ -551,14 +682,13 @@ Inherits MIT License from [vespo92/chromadblocal-mcp-server](https://github.com/
 
 ---
 
-## Success!
+## Success
 
 If everything works, you now have:
-- ✅ ChatGPT with persistent memory via ChromaDB
-- ✅ 22 advanced MCP tools for file processing
-- ✅ Batch indexing of entire codebases
-- ✅ Photo EXIF extraction and search
-- ✅ Watch folder auto-ingestion
-- ✅ Duplicate file detection
 
-**Enjoy building with MCP! 🚀**
+- ChatGPT with persistent memory via ChromaDB
+- 22 advanced MCP tools for file processing
+- Batch indexing of entire codebases
+- Photo EXIF extraction and search
+- Watch folder auto-ingestion
+- Duplicate file detection

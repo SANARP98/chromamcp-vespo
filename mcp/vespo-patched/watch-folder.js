@@ -18,6 +18,7 @@ import { readFile, writeFile, stat, access, mkdir } from 'fs/promises';
 import { join, dirname } from 'path';
 import { processFile, getFileCategory } from './batch-processor.js';
 import { extractExif, exifToMetadata, exifToSummary } from './exif-extractor.js';
+import { logDebug, logWarn, logError } from './logger.js';
 
 // Active watchers registry
 const activeWatchers = new Map();
@@ -45,7 +46,7 @@ async function saveWatcherState(state) {
     await mkdir(dirname(STATE_FILE), { recursive: true });
     await writeFile(STATE_FILE, JSON.stringify(state, null, 2));
   } catch (error) {
-    console.error(`Failed to save watcher state: ${error.message}`);
+    logError(`Failed to save watcher state: ${error.message}`);
   }
 }
 
@@ -151,9 +152,9 @@ function createDebouncedProcessor(options, chromaClient) {
         results.push(result);
 
         if (result.success) {
-          console.error(`📥 Auto-ingested: ${result.file} (${result.type})`);
+          logDebug(`Auto-ingested: ${result.file} (${result.type})`);
         } else if (!result.skipped) {
-          console.error(`⚠️ Failed to ingest: ${file} - ${result.error}`);
+          logWarn(`Failed to ingest: ${file} - ${result.error}`);
         }
 
       } catch (error) {
@@ -266,7 +267,7 @@ export async function startWatcher(watchPath, options, chromaClient) {
   });
   await saveWatcherState(state);
 
-  console.error(`👁️ Started watching: ${watchPath} -> ${collection}`);
+  logDebug(`Started watching: ${watchPath} -> ${collection}`);
 
   return {
     success: true,
@@ -298,7 +299,7 @@ export async function stopWatcher(watchPath) {
   state.watchers = state.watchers.filter(w => w.path !== watchPath);
   await saveWatcherState(state);
 
-  console.error(`🛑 Stopped watching: ${watchPath}`);
+  logDebug(`Stopped watching: ${watchPath}`);
 
   return {
     success: true,
@@ -369,7 +370,7 @@ export async function restoreWatchers(chromaClient) {
         restored.push(config.path);
       }
     } catch (error) {
-      console.error(`Failed to restore watcher for ${config.path}: ${error.message}`);
+      logError(`Failed to restore watcher for ${config.path}: ${error.message}`);
     }
   }
 

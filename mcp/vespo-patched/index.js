@@ -9,6 +9,7 @@ import {
 import { ChromaClient } from 'chromadb';
 import { writeFile, readFile, readdir, stat } from 'fs/promises';
 import { join } from 'path';
+import { logDebug, logWarn, logError } from './logger.js';
 
 // Batch processing imports
 import {
@@ -32,14 +33,7 @@ import { startWatcher, stopWatcher, listWatchers } from './watch-folder.js';
 // Duplicate detection
 import { findDuplicates, findCollectionDuplicates, compareFiles } from './duplicate-detector.js';
 
-// CRITICAL: Disable all console.error logging to prevent stdio contamination
-// Only use this logger for debugging AFTER handshake (if ever)
-const DEBUG = process.env.DEBUG_MCP === 'true';
-function debugLog(...args) {
-  if (DEBUG) {
-    console.error('[MCP-DEBUG]', ...args);
-  }
-}
+// CRITICAL: Avoid stdio contamination; only log when DEBUG_MCP=true
 
 function cleanMetadata(metadata) {
   return Object.fromEntries(
@@ -92,7 +86,7 @@ function translateToWorkspacePath(inputPath) {
 
   if (!hostWorkspace) {
     // No HOST_WORKSPACE set - can't translate, use /workspace as fallback
-    console.error('WARNING: HOST_WORKSPACE not set, cannot translate host path. Using /workspace as fallback.');
+    logWarn('HOST_WORKSPACE not set, cannot translate host path. Using /workspace as fallback.');
     return WORKSPACE_ROOT;
   }
 
@@ -108,14 +102,34 @@ function translateToWorkspacePath(inputPath) {
   }
 
   // Path doesn't match host workspace - might be trying to access outside mounted area
-  console.error(`WARNING: Path "${inputPath}" is outside mounted workspace "${hostWorkspace}". Using /workspace.`);
+  logWarn(`Path "${inputPath}" is outside mounted workspace "${hostWorkspace}". Using /workspace.`);
   return WORKSPACE_ROOT;
 }
 
+/**
+ * Get the repository/workspace name for use as default collection name.
+ * Uses HOST_WORKSPACE env var (set by wrapper) to get the original host path.
+ * Falls back to 'workspace' if not available.
+ */
+function getRepoName() {
+  const hostWorkspace = process.env.HOST_WORKSPACE;
+  if (hostWorkspace) {
+    // Extract the last component of the path (repo/folder name)
+    const parts = hostWorkspace.split('/').filter(p => p);
+    if (parts.length > 0) {
+      // Sanitize for use as collection name (alphanumeric, underscores, hyphens)
+      return parts[parts.length - 1].replace(/[^a-zA-Z0-9_-]/g, '_');
+    }
+  }
+  return 'workspace';
+}
+
 async function getWorkspaceMountInfo() {
+  const repoName = getRepoName();
   const info = {
     workspacePath: WORKSPACE_ROOT,
-    hostWorkspace: process.env.PWD || null,
+    hostWorkspace: process.env.HOST_WORKSPACE || null,
+    repoName,
     accessible: false,
     entryCount: 0,
     sampleEntries: [],
@@ -169,8 +183,8 @@ class ChromaContextMCP {
       const chromaUrl = process.env.CHROMA_URL || process.env.CHROMADB_URL;
 
       if (!chromaUrl) {
-        console.error('WARNING: CHROMA_URL/CHROMADB_URL not set. Using fallback: http://chromadb-vespo:8000');
-        console.error('If connection fails, ensure environment variables are configured correctly.');
+        logWarn('CHROMA_URL/CHROMADB_URL not set. Using fallback: http://chromadb-vespo:8000');
+        logWarn('If connection fails, ensure environment variables are configured correctly.');
       }
 
       this.localClient = new ChromaClient({
@@ -201,7 +215,7 @@ class ChromaContextMCP {
 
       if (result.metadatas && result.metadatas[0]) {
         this.currentEnvironment = result.metadatas[0].environment;
-        debugLog(`Current environment: ${this.currentEnvironment}`);
+        logDebug(`Current environment: ${this.currentEnvironment}`);
 
         // Get remote ChromaDB URL for this environment
         const envCollection = await client.getCollection({ name: 'vinos_environments' });
@@ -212,12 +226,12 @@ class ChromaContextMCP {
           if (this.remoteUrl !== nextRemoteUrl) {
             this.remoteUrl = nextRemoteUrl;
             this.remoteClient = null;
-            debugLog(`Remote ChromaDB: ${this.remoteUrl}`);
+            logDebug(`Remote ChromaDB: ${this.remoteUrl}`);
           }
         }
       }
     } catch (error) {
-      debugLog(`Could not get environment: ${error.message}`);
+      logDebug(`Could not get environment: ${error.message}`);
     }
 
     return this.currentEnvironment;
@@ -237,11 +251,11 @@ class ChromaContextMCP {
       const localCollectionNames = collections.map(c => c.name);
 
       if (localCollectionNames.includes(collection)) {
-        debugLog(`Routing to local: ${collection} exists locally`);
+        logDebug(`Routing to local: ${collection} exists locally`);
         return 'local';
       }
     } catch (error) {
-      debugLog(`Error checking local collections: ${error.message}`);
+      logDebug(`Error checking local collections: ${error.message}`);
     }
 
     // Route based on collection patterns
@@ -284,7 +298,7 @@ class ChromaContextMCP {
             const route = await this.routeQuery(query, collection);
             const client = await this.getClient(route);
 
-            debugLog(`Searching in ${route} ChromaDB, collection: ${collection}`);
+            logDebug(`Searching in ${route} ChromaDB, collection: ${collection}`);
 
             const coll = await client.getOrCreateCollection({ name: collection });
             const results = await coll.query({
@@ -382,7 +396,7 @@ class ChromaContextMCP {
                 const remoteClient = await this.getRemoteClient();
                 remoteCollections = await remoteClient.listCollections();
               } catch (remoteError) {
-                debugLog(`Could not list remote collections: ${remoteError.message}`);
+                logDebug(`Could not list remote collections: ${remoteError.message}`);
               }
             }
 
@@ -428,7 +442,7 @@ class ChromaContextMCP {
                 where: { type: 'component' }
               });
             } catch (localError) {
-              debugLog(`Local pattern search failed: ${localError.message}`);
+              logDebug(`Local pattern search failed: ${localError.message}`);
             }
 
             // If no results and remote available, try remote
@@ -442,9 +456,9 @@ class ChromaContextMCP {
                   where: { type: 'component' }
                 });
                 source = 'remote';
-                debugLog(`Found patterns in remote ChromaDB`);
+                logDebug('Found patterns in remote ChromaDB');
               } catch (remoteError) {
-                debugLog(`Remote pattern search failed: ${remoteError.message}`);
+                logDebug(`Remote pattern search failed: ${remoteError.message}`);
               }
             }
 
@@ -561,9 +575,11 @@ class ChromaContextMCP {
         }
 
         case 'batch_ingest': {
+          // Get repo name first to use as default collection name
+          const repoName = getRepoName();
           const {
             path: dirPath,
-            collection = 'batch_files',
+            collection = repoName,  // Default to repo name for automatic context retrieval
             recursive = true,
             categories = null,
             extensions = null,
@@ -575,7 +591,7 @@ class ChromaContextMCP {
             // Translate host paths (e.g., /Users/foo/project) to container paths (/workspace)
             const effectivePath = translateToWorkspacePath(dirPath);
             const workspaceInfo = await getWorkspaceMountInfo();
-            debugLog(`Input path: ${dirPath} -> Effective path: ${effectivePath}`);
+            logDebug(`Input path: ${dirPath} -> Effective path: ${effectivePath}, Collection: ${collection}`);
 
             // Scan for files
             const files = await scanDirectory(effectivePath, {
@@ -585,7 +601,7 @@ class ChromaContextMCP {
               maxFiles: max_files
             });
 
-            debugLog(`Found ${files.length} files, processing...`);
+            logDebug(`Found ${files.length} files, processing...`);
 
             // Process files
             const { results, errors, stats } = await batchProcessFiles(files, {
@@ -594,12 +610,12 @@ class ChromaContextMCP {
               basePath: effectivePath,
               onProgress: (p) => {
                 if (p.processed % 50 === 0) {
-                  debugLog(`Progress: ${p.percent}% (${p.processed}/${p.total})`);
+                  logDebug(`Progress: ${p.percent}% (${p.processed}/${p.total})`);
                 }
               }
             });
 
-            debugLog(`Processed ${results.length} files, storing in ChromaDB...`);
+            logDebug(`Processed ${results.length} files, storing in ChromaDB...`);
 
             // Store in ChromaDB
             const client = await this.getLocalClient();
@@ -623,7 +639,7 @@ class ChromaContextMCP {
               });
 
               stored += batch.length;
-              debugLog(`Stored ${stored}/${results.length} documents`);
+              logDebug(`Stored ${stored}/${results.length} documents`);
             }
 
             const payload = {
@@ -659,6 +675,8 @@ class ChromaContextMCP {
         }
 
         case 'quick_load': {
+          // Get repo name for default collection naming
+          const repoName = getRepoName();
           const {
             path: dirPath,
             name = null,
@@ -671,9 +689,9 @@ class ChromaContextMCP {
             // Translate host paths to container paths
             const effectivePath = translateToWorkspacePath(dirPath);
             const workspaceInfo = await getWorkspaceMountInfo();
-            // Create temp collection name
-            const tempName = name || `temp_${Date.now()}`;
-            debugLog(`Quick loading to collection: ${tempName} (path: ${dirPath} -> ${effectivePath})`);
+            // Use repo name or generate temp name
+            const tempName = name || `${repoName}_quick`;
+            logDebug(`Quick loading to collection: ${tempName} (path: ${dirPath} -> ${effectivePath})`);
 
             // Scan and process
             const files = await scanDirectory(effectivePath, {
@@ -1148,7 +1166,7 @@ class ChromaContextMCP {
           } = args;
 
           try {
-            debugLog(`Scanning for duplicates in ${dirPath}...`);
+            logDebug(`Scanning for duplicates in ${dirPath}...`);
 
             const result = await findDuplicates(dirPath, {
               recursive,
@@ -1158,12 +1176,12 @@ class ChromaContextMCP {
               maxFiles: max_files,
               onProgress: (p) => {
                 if (p.processed % 100 === 0) {
-                  debugLog(`${p.phase}: ${p.processed}/${p.total}`);
+                  logDebug(`${p.phase}: ${p.processed}/${p.total}`);
                 }
               }
             });
 
-            debugLog(`Found ${result.duplicateGroups} duplicate groups`);
+            logDebug(`Found ${result.duplicateGroups} duplicate groups`);
 
             return {
               content: [{
@@ -1703,4 +1721,6 @@ class ChromaContextMCP {
 }
 
 const server = new ChromaContextMCP();
-server.run().catch(console.error);
+server.run().catch((error) => {
+  logError('Server run failed', error?.message || error);
+});

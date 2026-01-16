@@ -19,6 +19,7 @@
 import { readdir, stat, readFile } from 'fs/promises';
 import { join, extname, basename, dirname, relative } from 'path';
 import { createHash } from 'crypto';
+import { logError } from './logger.js';
 
 // Lazy load EXIF extractor to avoid circular deps
 let exifExtractor = null;
@@ -365,7 +366,7 @@ export async function scanDirectory(dirPath, options = {}) {
         }
       }
     } catch (error) {
-      console.error(`Error scanning ${currentPath}: ${error.message}`);
+      logError(`Error scanning ${currentPath}: ${error.message}`);
     }
   }
 
