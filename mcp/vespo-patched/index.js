@@ -48,6 +48,26 @@ function isWorkspacePath(targetPath) {
 }
 
 /**
+ * Check if a path looks like a Windows absolute path (e.g., C:\foo or C:/foo)
+ */
+function isWindowsAbsolutePath(p) {
+  return /^[A-Za-z]:[\\/]/.test(p);
+}
+
+/**
+ * Normalize a path for comparison (convert backslashes to forward slashes, lowercase drive letter)
+ */
+function normalizePath(p) {
+  if (!p) return p;
+  let normalized = p.replace(/\\/g, '/');
+  // Lowercase drive letter for consistent comparison
+  if (/^[A-Za-z]:/.test(normalized)) {
+    normalized = normalized[0].toLowerCase() + normalized.slice(1);
+  }
+  return normalized;
+}
+
+/**
  * Translate host paths to container workspace paths.
  * When Codex passes "/Users/foo/myproject", we need to translate it to "/workspace"
  * since that's where the host directory is mounted in the container.
@@ -55,7 +75,8 @@ function isWorkspacePath(targetPath) {
  * The wrapper script injects HOST_WORKSPACE env var with the original host path.
  *
  * Handles:
- * - Absolute host paths: /Users/foo/project -> /workspace
+ * - Windows absolute paths: C:\Users\foo\project -> /workspace
+ * - Unix absolute host paths: /Users/foo/project -> /workspace
  * - Relative paths: ".", "./src", "src" -> /workspace, /workspace/src
  * - Already workspace paths: /workspace/src -> /workspace/src
  */
@@ -70,12 +91,6 @@ function translateToWorkspacePath(inputPath) {
     return WORKSPACE_ROOT + inputPath.slice(1);
   }
 
-  // Handle paths that don't start with / (relative paths without ./)
-  if (!inputPath.startsWith('/')) {
-    // src -> /workspace/src
-    return `${WORKSPACE_ROOT}/${inputPath}`;
-  }
-
   // Already a workspace path
   if (isWorkspacePath(inputPath)) {
     return inputPath;
@@ -84,20 +99,53 @@ function translateToWorkspacePath(inputPath) {
   // Get the host workspace from HOST_WORKSPACE environment (set by wrapper script)
   const hostWorkspace = process.env.HOST_WORKSPACE;
 
+  // Handle Windows absolute paths (C:\foo or C:/foo)
+  if (isWindowsAbsolutePath(inputPath)) {
+    if (!hostWorkspace) {
+      logWarn('HOST_WORKSPACE not set, cannot translate Windows path. Using /workspace as fallback.');
+      return WORKSPACE_ROOT;
+    }
+
+    const normalizedInput = normalizePath(inputPath);
+    const normalizedHost = normalizePath(hostWorkspace);
+
+    if (normalizedInput === normalizedHost) {
+      return WORKSPACE_ROOT;
+    }
+
+    if (normalizedInput.startsWith(normalizedHost + '/')) {
+      const relativePath = normalizedInput.slice(normalizedHost.length);
+      return WORKSPACE_ROOT + relativePath;
+    }
+
+    // Path is outside the mounted workspace
+    logWarn(`Windows path "${inputPath}" is outside mounted workspace "${hostWorkspace}". Using /workspace.`);
+    return WORKSPACE_ROOT;
+  }
+
+  // Handle paths that don't start with / (relative paths without ./)
+  if (!inputPath.startsWith('/')) {
+    // src -> /workspace/src
+    return `${WORKSPACE_ROOT}/${inputPath}`;
+  }
+
   if (!hostWorkspace) {
     // No HOST_WORKSPACE set - can't translate, use /workspace as fallback
     logWarn('HOST_WORKSPACE not set, cannot translate host path. Using /workspace as fallback.');
     return WORKSPACE_ROOT;
   }
 
-  // Check if the input path matches or is under the host workspace
-  if (inputPath === hostWorkspace) {
+  // Check if the input path matches or is under the host workspace (Unix paths)
+  const normalizedInput = normalizePath(inputPath);
+  const normalizedHost = normalizePath(hostWorkspace);
+
+  if (normalizedInput === normalizedHost) {
     return WORKSPACE_ROOT;
   }
 
-  if (inputPath.startsWith(hostWorkspace + '/')) {
+  if (normalizedInput.startsWith(normalizedHost + '/')) {
     // Translate subpath: /Users/foo/myproject/src -> /workspace/src
-    const relativePath = inputPath.slice(hostWorkspace.length);
+    const relativePath = normalizedInput.slice(normalizedHost.length);
     return WORKSPACE_ROOT + relativePath;
   }
 
@@ -535,15 +583,19 @@ class ChromaContextMCP {
           } = args;
 
           try {
-            const workspaceInfo = isWorkspacePath(dirPath) ? await getWorkspaceMountInfo() : null;
-            const files = await scanDirectory(dirPath, {
+            // Translate host paths (e.g., /Users/foo/project or C:\Users\foo) to container paths (/workspace)
+            const effectivePath = translateToWorkspacePath(dirPath);
+            const workspaceInfo = await getWorkspaceMountInfo();
+            logDebug(`scan_directory: Input path: ${dirPath} -> Effective path: ${effectivePath}`);
+
+            const files = await scanDirectory(effectivePath, {
               recursive,
               categories: categories ? categories.split(',').map(c => c.trim()) : null,
               extensions: extensions ? extensions.split(',').map(e => e.trim().startsWith('.') ? e.trim() : `.${e.trim()}`) : null,
               maxFiles: max_files
             });
 
-            const stats = await getDirectoryStats(dirPath, { recursive, maxFiles: max_files });
+            const stats = await getDirectoryStats(effectivePath, { recursive, maxFiles: max_files });
 
             const payload = {
               directory: dirPath,
