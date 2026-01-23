@@ -23,6 +23,25 @@ const CONFIG = {
 
 const IS_WINDOWS = process.platform === 'win32';
 
+// Detect system architecture and map to Docker platform
+function getDockerPlatform() {
+  const arch = os.arch();
+  // Map Node.js arch to Docker platform format
+  switch (arch) {
+    case 'arm64':
+      return 'linux/arm64';
+    case 'x64':
+    case 'x86_64':
+      return 'linux/amd64';
+    case 'arm':
+      return 'linux/arm/v7';
+    default:
+      // Default to amd64 for unknown architectures
+      logWarn(`Unknown architecture '${arch}', defaulting to linux/amd64`);
+      return 'linux/amd64';
+  }
+}
+
 function logInfo(message) {
   console.log(message);
 }
@@ -234,7 +253,10 @@ async function waitForChroma(port, maxSeconds) {
 }
 
 function buildImage(patchedPath, imageName) {
-  runCommand('docker', ['build', '-t', imageName, '-f', 'Dockerfile', '.'], {
+  const platform = getDockerPlatform();
+  logInfo(`Detected architecture: ${os.arch()} -> Building for platform: ${platform}`);
+
+  runCommand('docker', ['build', '--platform', platform, '-t', imageName, '-f', 'Dockerfile', '.'], {
     cwd: patchedPath,
     stdio: 'inherit'
   });

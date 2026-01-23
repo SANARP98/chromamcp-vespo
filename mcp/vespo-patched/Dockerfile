@@ -1,5 +1,10 @@
 # Dockerfile for MCP-compliant Chroma server (stdio clean)
 # CRITICAL: This Dockerfile ensures ZERO stdout contamination during MCP handshake
+# Supports multi-platform builds (amd64, arm64) for Windows, macOS, and Linux
+
+# Use buildx platform argument for multi-arch support
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
 
 FROM oven/bun:1
 
