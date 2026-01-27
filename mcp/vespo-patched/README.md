@@ -107,7 +107,10 @@ cd ~/your-project-folder
 # Step 10: Start Codex
 codex
 
-# Step 11: Test the MCP server
+# Step 11: Index your repository first
+# Type in Codex: "Scan and batch ingest /workspace into a collection"
+
+# Step 12: Verify by listing collections
 # Type in Codex: "List chroma collections"
 ```
 
@@ -184,7 +187,10 @@ cd C:\Users\YourUsername\your-project-folder
 # Step 10: Start Codex
 codex
 
-# Step 11: Test the MCP server
+# Step 11: Index your repository first
+# Type in Codex: "Scan and batch ingest repository into a collection"
+
+# Step 12: Verify by listing collections
 # Type in Codex: "List chroma collections"
 ```
 
@@ -431,20 +437,19 @@ You should see `chromadb_context_vespo` in the list.
 
 After installation, test these commands in Codex:
 
-### Basic Commands
-
-```text
-You: List all MCP tools available
-You: List chroma collections
-You: Get environment info
-```
-
-### Index a Directory
+### Index Your Repository First
 
 ```text
 You: Scan directory /workspace
 You: Batch ingest /workspace into collection my_codebase
+```
+
+### List Collections and Search
+
+```text
+You: List chroma collections
 You: Search for authentication in my_codebase
+You: Get environment info
 ```
 
 ### Work with Photos
