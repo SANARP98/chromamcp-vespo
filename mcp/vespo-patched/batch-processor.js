@@ -254,6 +254,22 @@ async function readTextContent(filePath, maxSize = 1024 * 100) { // 100KB max
   }
 }
 
+// Split text into fixed-size chunks with overlap for better vector search
+function splitIntoChunks(text, chunkSize = 1500, overlap = 200) {
+  if (!text || text.length <= chunkSize) {
+    return [text];
+  }
+  const chunks = [];
+  let start = 0;
+  while (start < text.length) {
+    const end = Math.min(start + chunkSize, text.length);
+    chunks.push(text.slice(start, end));
+    if (end >= text.length) break;
+    start += chunkSize - overlap;
+  }
+  return chunks;
+}
+
 // Process a single file for ChromaDB ingestion
 export async function processFile(filePath, options = {}) {
   const {
@@ -297,11 +313,39 @@ export async function processFile(filePath, options = {}) {
   metadata.full_path = filePath;
   metadata.processed_at = new Date().toISOString();
 
-  return {
-    id: generateDocId(filePath),
-    content,
-    metadata
-  };
+  const fileLabel = metadata.relative_path || metadata.filename;
+  const baseId = generateDocId(filePath);
+
+  // For text/code files, split into chunks for better vector search
+  if (category.extractText && includeContent && content && content.length > 1500) {
+    const chunks = splitIntoChunks(content);
+    return chunks.map((chunk, idx) => {
+      const header = `// File: ${fileLabel} | Chunk ${idx + 1}/${chunks.length}\n`;
+      return {
+        id: `${baseId}_chunk_${idx}`,
+        content: header + chunk,
+        metadata: {
+          ...metadata,
+          chunk_index: idx,
+          total_chunks: chunks.length,
+          start_char: idx === 0 ? 0 : idx * (1500 - 200),
+          end_char: Math.min((idx === 0 ? 0 : idx * (1500 - 200)) + 1500, content.length)
+        }
+      };
+    });
+  }
+
+  // Single document (small text files, images, CAD)
+  const header = `// File: ${fileLabel}\n`;
+  return [{
+    id: baseId,
+    content: header + content,
+    metadata: {
+      ...metadata,
+      chunk_index: 0,
+      total_chunks: 1
+    }
+  }];
 }
 
 // Scan directory for files matching criteria
@@ -405,7 +449,9 @@ export async function batchProcessFiles(files, options = {}) {
 
     for (const res of batchResults) {
       if (res.success) {
-        results.push(res.result);
+        // processFile now returns an array of chunks
+        const chunks = Array.isArray(res.result) ? res.result : [res.result];
+        results.push(...chunks);
       } else {
         errors.push({ file: res.file, error: res.error });
       }

@@ -73,8 +73,8 @@ async function processNewFile(filePath, options, chromaClient) {
       }
     }
 
-    // Process the file
-    const processed = await processFile(filePath, { includeContent: true });
+    // Process the file (returns array of chunks)
+    const chunks = await processFile(filePath, { includeContent: true });
 
     // Extract EXIF for images if enabled
     let exifMeta = {};
@@ -90,28 +90,30 @@ async function processNewFile(filePath, options, chromaClient) {
     // Add to ChromaDB
     const coll = await chromaClient.getOrCreateCollection({ name: collection });
 
-    const content = exifSummary
-      ? `${processed.content}\n\nEXIF Data:\n${exifSummary}`
-      : processed.content;
+    const ingestedAt = new Date().toISOString();
+    const watchFolder = dirname(filePath);
 
     await coll.add({
-      ids: [processed.id],
-      documents: [content],
-      metadatas: [{
-        ...processed.metadata,
+      ids: chunks.map(c => c.id),
+      documents: chunks.map(c => exifSummary
+        ? `${c.content}\n\nEXIF Data:\n${exifSummary}`
+        : c.content),
+      metadatas: chunks.map(c => ({
+        ...c.metadata,
         ...exifMeta,
         auto_ingested: true,
-        ingested_at: new Date().toISOString(),
-        watch_folder: dirname(filePath)
-      }]
+        ingested_at: ingestedAt,
+        watch_folder: watchFolder
+      }))
     });
 
     return {
       success: true,
-      id: processed.id,
-      file: processed.metadata.filename,
+      id: chunks[0].id,
+      file: chunks[0].metadata.filename,
       type: category.type,
-      hasExif: Object.keys(exifMeta).length > 0
+      hasExif: Object.keys(exifMeta).length > 0,
+      chunks_stored: chunks.length
     };
 
   } catch (error) {

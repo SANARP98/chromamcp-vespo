@@ -1027,19 +1027,20 @@ class ChromaContextMCP {
           const { path: filePath, collection = 'files', metadata: extraMeta = {} } = args;
 
           try {
-            const processed = await processFile(filePath, { includeContent: true });
+            const chunks = await processFile(filePath, { includeContent: true });
 
             const client = await this.getLocalClient();
             const coll = await client.getOrCreateCollection({ name: collection });
 
+            const ingestedAt = new Date().toISOString();
             await coll.add({
-              ids: [processed.id],
-              documents: [processed.content],
-              metadatas: [{
-                ...processed.metadata,
+              ids: chunks.map(c => c.id),
+              documents: chunks.map(c => c.content),
+              metadatas: chunks.map(c => ({
+                ...c.metadata,
                 ...extraMeta,
-                ingested_at: new Date().toISOString()
-              }]
+                ingested_at: ingestedAt
+              }))
             });
 
             return {
@@ -1047,11 +1048,12 @@ class ChromaContextMCP {
                 type: 'text',
                 text: JSON.stringify({
                   success: true,
-                  id: processed.id,
+                  id: chunks[0].id,
                   collection,
-                  file: processed.metadata.filename,
-                  type: processed.metadata.file_type,
-                  size: processed.metadata.size_human
+                  file: chunks[0].metadata.filename,
+                  type: chunks[0].metadata.file_type,
+                  size: chunks[0].metadata.size_human,
+                  chunks_stored: chunks.length
                 }, null, 2),
               }],
             };
