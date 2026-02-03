@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+// Load environment variables from .env file
+import 'dotenv/config';
+
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -26,6 +29,9 @@ import {
 
 // EXIF extraction
 import { extractExif, exifToSummary, exifToMetadata } from './exif-extractor.js';
+
+// OpenAI embeddings
+import { createEmbedder } from './openai-embedder.js';
 
 // Watch folder
 import { startWatcher, stopWatcher, listWatchers } from './watch-folder.js';
@@ -296,7 +302,7 @@ class ChromaContextMCP {
     try {
       const localClient = await this.getLocalClient();
       const collections = await localClient.listCollections();
-      const localCollectionNames = collections.map(c => c.name);
+      const localCollectionNames = collections.map(c => typeof c === 'string' ? c : c.name);
 
       if (localCollectionNames.includes(collection)) {
         logDebug(`Routing to local: ${collection} exists locally`);
@@ -449,8 +455,8 @@ class ChromaContextMCP {
             }
 
             const result = {
-              local: localCollections.map(c => c.name),
-              remote: remoteCollections.map(c => c.name),
+              local: localCollections.map(c => typeof c === 'string' ? c : c.name),
+              remote: remoteCollections.map(c => typeof c === 'string' ? c : c.name),
               environment: this.currentEnvironment,
               remoteUrl: this.remoteUrl
             };
@@ -720,6 +726,146 @@ class ChromaContextMCP {
               content: [{
                 type: 'text',
                 text: `Error in batch ingest: ${error.message}`,
+              }],
+              isError: true,
+            };
+          }
+        }
+
+        case 'smart_ingest': {
+          // Smart code-aware ingestion with OpenAI embeddings
+          const repoName = getRepoName();
+          const {
+            path: dirPath,
+            collection = repoName,
+            recursive = true,
+            extensions = null,
+            max_files = 100,
+            chunk_size = 4000,
+            overlap = 200
+          } = args;
+
+          try {
+            // Check for OpenAI API key
+            if (!process.env.OPENAI_API_KEY) {
+              return {
+                content: [{
+                  type: 'text',
+                  text: 'Error: OPENAI_API_KEY environment variable not set. Smart ingestion requires OpenAI embeddings.',
+                }],
+                isError: true,
+              };
+            }
+
+            // Initialize OpenAI embedder
+            const embedder = createEmbedder(process.env.OPENAI_API_KEY);
+
+            // Translate host paths
+            const effectivePath = translateToWorkspacePath(dirPath);
+            const workspaceInfo = await getWorkspaceMountInfo();
+            logDebug(`Smart ingest - Input path: ${dirPath} -> Effective path: ${effectivePath}, Collection: ${collection}`);
+
+            // Default to code file extensions for smart ingestion
+            const defaultExtensions = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.py', '.pyw'];
+            const fileExtensions = extensions
+              ? extensions.split(',').map(e => e.trim().startsWith('.') ? e.trim() : `.${e.trim()}`)
+              : defaultExtensions;
+
+            // Scan for files
+            const files = await scanDirectory(effectivePath, {
+              recursive,
+              extensions: fileExtensions,
+              maxFiles: max_files
+            });
+
+            logDebug(`Found ${files.length} code files, processing with smart chunking...`);
+
+            // Process files with smart chunking enabled
+            const { results, errors, stats } = await batchProcessFiles(files, {
+              concurrency: 5, // Lower concurrency for smart processing
+              includeContent: true,
+              basePath: effectivePath,
+              useSmartChunking: true,
+              chunkSize: chunk_size,
+              overlap: overlap,
+              onProgress: (p) => {
+                if (p.processed % 10 === 0) {
+                  logDebug(`Smart chunking progress: ${p.percent}% (${p.processed}/${p.total})`);
+                }
+              }
+            });
+
+            logDebug(`Processed ${results.length} chunks, generating OpenAI embeddings...`);
+
+            // Generate OpenAI embeddings
+            const texts = results.map(r => r.content);
+            const embeddings = await embedder.embed(texts, { showProgress: true });
+
+            logDebug(`Generated ${embeddings.length} embeddings, storing in ChromaDB...`);
+
+            // Store in ChromaDB with pre-computed embeddings
+            const client = await this.getLocalClient();
+            const coll = await client.getOrCreateCollection({ name: collection });
+
+            // Batch insert with embeddings
+            const batchSize = 100;
+            let stored = 0;
+
+            for (let i = 0; i < results.length; i += batchSize) {
+              const batch = results.slice(i, i + batchSize);
+              const batchEmbeddings = embeddings.slice(i, i + batchSize);
+
+              await coll.add({
+                ids: batch.map(r => r.id),
+                documents: batch.map(r => r.content),
+                embeddings: batchEmbeddings,
+                metadatas: batch.map(r => ({
+                  ...r.metadata,
+                  smart_ingest: true,
+                  source_directory: dirPath,
+                  embedding_model: embedder.model,
+                  embedding_provider: 'openai'
+                }))
+              });
+
+              stored += batch.length;
+              logDebug(`Stored ${stored}/${results.length} chunks`);
+            }
+
+            // Calculate cost
+            const totalTokens = texts.reduce((sum, t) => sum + embedder.estimateTokens(t), 0);
+            const estimatedCost = embedder.calculateCost(totalTokens);
+
+            const payload = {
+              success: true,
+              collection,
+              source_directory: dirPath,
+              files_found: files.length,
+              files_processed: stats.processed,
+              chunks_created: results.length,
+              chunks_stored: stored,
+              embedding_model: embedder.model,
+              embedding_tokens: totalTokens,
+              estimated_cost_usd: estimatedCost.toFixed(4),
+              errors: errors.length,
+              error_details: errors.slice(0, 10)
+            };
+
+            if (workspaceInfo) {
+              payload.workspace = workspaceInfo;
+            }
+
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify(payload, null, 2),
+              }],
+            };
+          } catch (error) {
+            return {
+              content: [{
+                type: 'text',
+                text: `Error in smart ingest: ${error.message}\nStack: ${error.stack}`,
               }],
               isError: true,
             };
@@ -1460,6 +1606,44 @@ class ChromaContextMCP {
                 include_content: {
                   type: 'boolean',
                   description: 'Extract and store file content for text files (default: true)',
+                },
+              },
+              required: ['path'],
+            },
+          },
+          {
+            name: 'smart_ingest',
+            description: 'Ingest code files with intelligent code-aware chunking and OpenAI embeddings. Automatically detects functions, classes, and logical code boundaries. Supports JavaScript, TypeScript, and Python. Requires OPENAI_API_KEY environment variable.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                path: {
+                  type: 'string',
+                  description: 'Directory path containing code files to ingest',
+                },
+                collection: {
+                  type: 'string',
+                  description: 'Target collection name (default: repository name)',
+                },
+                recursive: {
+                  type: 'boolean',
+                  description: 'Include subdirectories (default: true)',
+                },
+                extensions: {
+                  type: 'string',
+                  description: 'Comma-separated extensions (default: .js,.jsx,.ts,.tsx,.py)',
+                },
+                max_files: {
+                  type: 'number',
+                  description: 'Maximum files to process (default: 100)',
+                },
+                chunk_size: {
+                  type: 'number',
+                  description: 'Maximum chunk size in characters (default: 4000)',
+                },
+                overlap: {
+                  type: 'number',
+                  description: 'Overlap between chunks in characters (default: 200)',
                 },
               },
               required: ['path'],

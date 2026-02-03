@@ -20,6 +20,7 @@ import { readdir, stat, readFile } from 'fs/promises';
 import { join, extname, basename, dirname, relative } from 'path';
 import { createHash } from 'crypto';
 import { logError } from './logger.js';
+import { intelligentChunk } from './smart-chunker.js';
 
 // Lazy load EXIF extractor to avoid circular deps
 let exifExtractor = null;
@@ -275,7 +276,10 @@ export async function processFile(filePath, options = {}) {
   const {
     includeContent = true,
     maxContentSize = 100 * 1024, // 100KB
-    basePath = null
+    basePath = null,
+    useSmartChunking = false,
+    chunkSize = 4000,
+    overlap = 200
   } = options;
 
   const category = getFileCategory(filePath);
@@ -316,7 +320,38 @@ export async function processFile(filePath, options = {}) {
   const fileLabel = metadata.relative_path || metadata.filename;
   const baseId = generateDocId(filePath);
 
-  // For text/code files, split into chunks for better vector search
+  // NEW: Smart chunking for code files (JavaScript, TypeScript, Python)
+  const ext = extname(filePath).toLowerCase();
+  const isCodeFile = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.py', '.pyw'].includes(ext);
+
+  if (useSmartChunking && category.extractText && includeContent && content && isCodeFile) {
+    try {
+      const smartChunks = await intelligentChunk(content, filePath, {
+        maxChunkSize: chunkSize,
+        overlap: overlap
+      });
+
+      return smartChunks.map((chunk, idx) => {
+        const header = `// File: ${fileLabel} | Chunk ${idx + 1}/${smartChunks.length}\n`;
+        return {
+          id: `${baseId}_chunk_${idx}`,
+          content: header + chunk.content,
+          metadata: {
+            ...metadata,
+            ...chunk.metadata,
+            chunk_index: idx,
+            total_chunks: smartChunks.length,
+            chunking_method: 'smart'
+          }
+        };
+      });
+    } catch (error) {
+      console.warn(`Smart chunking failed for ${filePath}: ${error.message}. Falling back to simple chunking.`);
+      // Fall through to simple chunking
+    }
+  }
+
+  // EXISTING: Simple chunking for text/code files
   if (category.extractText && includeContent && content && content.length > 1500) {
     const chunks = splitIntoChunks(content);
     return chunks.map((chunk, idx) => {
@@ -329,7 +364,8 @@ export async function processFile(filePath, options = {}) {
           chunk_index: idx,
           total_chunks: chunks.length,
           start_char: idx === 0 ? 0 : idx * (1500 - 200),
-          end_char: Math.min((idx === 0 ? 0 : idx * (1500 - 200)) + 1500, content.length)
+          end_char: Math.min((idx === 0 ? 0 : idx * (1500 - 200)) + 1500, content.length),
+          chunking_method: 'simple'
         }
       };
     });

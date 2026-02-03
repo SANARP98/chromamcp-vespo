@@ -13,6 +13,11 @@ WORKDIR /app
 # Copy all source files
 COPY package.json bun.lock* ./
 COPY *.js ./
+COPY .env.example ./
+COPY .env* ./
+
+# Note: .env file is now copied into the image. dotenv will load it automatically.
+# You can still override with: docker run -e OPENAI_API_KEY=sk-...
 
 # Install dependencies
 # Using --silent to minimize potential stdout noise
