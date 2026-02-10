@@ -4,6 +4,7 @@
  */
 
 import OpenAI from 'openai';
+import { logDebug, logWarn } from './logger.js';
 
 export class OpenAIEmbedder {
   constructor(apiKey, options = {}) {
@@ -50,7 +51,7 @@ export class OpenAIEmbedder {
       const batch = batches[i];
 
       if (showProgress) {
-        console.error(`Embedding batch ${i + 1}/${batches.length} (${batch.length} texts)...`);
+        logDebug(`Embedding batch ${i + 1}/${batches.length} (${batch.length} texts)...`);
       }
 
       // Check rate limits before making request
@@ -78,7 +79,7 @@ export class OpenAIEmbedder {
 
     if (showProgress) {
       const cost = this.calculateCost(totalTokens);
-      console.error(`Embeddings generated. Tokens used: ${totalTokens}, Estimated cost: $${cost.toFixed(4)}`);
+      logDebug(`Embeddings generated. Tokens used: ${totalTokens}, Estimated cost: $${cost.toFixed(4)}`);
     }
 
     return allEmbeddings;
@@ -114,8 +115,8 @@ export class OpenAIEmbedder {
       // Calculate backoff delay (exponential: 1s, 2s, 4s)
       const delay = Math.pow(2, retryCount) * 1000;
 
-      console.warn(`OpenAI API error (attempt ${retryCount + 1}/${this.maxRetries}): ${error.message}`);
-      console.warn(`Retrying in ${delay}ms...`);
+      logWarn(`OpenAI API error (attempt ${retryCount + 1}/${this.maxRetries}): ${error.message}`);
+      logWarn(`Retrying in ${delay}ms...`);
 
       // Wait before retrying
       await new Promise(resolve => setTimeout(resolve, delay));
@@ -170,7 +171,7 @@ export class OpenAIEmbedder {
     if (wouldExceedRequests || wouldExceedTokens) {
       // Calculate time to wait until window resets
       const timeUntilReset = windowDuration - (now - this.windowStart);
-      console.error(`Rate limit approaching. Waiting ${Math.ceil(timeUntilReset / 1000)}s...`);
+      logWarn(`Rate limit approaching. Waiting ${Math.ceil(timeUntilReset / 1000)}s...`);
       await new Promise(resolve => setTimeout(resolve, timeUntilReset));
 
       // Reset counters

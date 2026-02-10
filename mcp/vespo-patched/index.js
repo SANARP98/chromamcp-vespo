@@ -168,8 +168,8 @@ function translateToWorkspacePath(inputPath) {
 function getRepoName() {
   const hostWorkspace = process.env.HOST_WORKSPACE;
   if (hostWorkspace) {
-    // Extract the last component of the path (repo/folder name)
-    const parts = hostWorkspace.split('/').filter(p => p);
+    // Normalize to forward slashes so both C:\foo\bar and /foo/bar work
+    const parts = normalizePath(hostWorkspace).split('/').filter(p => p);
     if (parts.length > 0) {
       // Sanitize for use as collection name (alphanumeric, underscores, hyphens)
       return parts[parts.length - 1].replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -355,10 +355,30 @@ class ChromaContextMCP {
             logDebug(`Searching in ${route} ChromaDB, collection: ${collection}`);
 
             const coll = await client.getOrCreateCollection({ name: collection });
-            const results = await coll.query({
-              queryTexts: [query],
-              nResults: limit
-            });
+
+            // Detect if collection uses OpenAI embeddings (from smart_ingest)
+            let results;
+            const sample = await coll.peek({ limit: 1 });
+            const usesOpenAI = sample.metadatas?.[0]?.embedding_provider === 'openai';
+
+            if (usesOpenAI) {
+              const apiKey = process.env.OPENAI_API_KEY;
+              if (!apiKey) {
+                throw new Error('Collection uses OpenAI embeddings but OPENAI_API_KEY is not set');
+              }
+              const model = sample.metadatas[0].embedding_model || 'text-embedding-3-large';
+              const embedder = createEmbedder(apiKey, { model });
+              const queryVector = await embedder.embedSingle(query);
+              results = await coll.query({
+                queryEmbeddings: [queryVector],
+                nResults: limit
+              });
+            } else {
+              results = await coll.query({
+                queryTexts: [query],
+                nResults: limit
+              });
+            }
 
             if (!results.documents || !results.documents[0] || results.documents[0].length === 0) {
               return {
@@ -486,15 +506,27 @@ class ChromaContextMCP {
             let results = null;
             let source = 'local';
 
+            // Helper: query a collection with correct embedding strategy
+            async function queryCollection(coll, queryText, nResults) {
+              const sample = await coll.peek({ limit: 1 });
+              const usesOpenAI = sample.metadatas?.[0]?.embedding_provider === 'openai';
+
+              if (usesOpenAI) {
+                const apiKey = process.env.OPENAI_API_KEY;
+                if (!apiKey) throw new Error('Collection uses OpenAI embeddings but OPENAI_API_KEY is not set');
+                const model = sample.metadatas[0].embedding_model || 'text-embedding-3-large';
+                const embedder = createEmbedder(apiKey, { model });
+                const queryVector = await embedder.embedSingle(queryText);
+                return await coll.query({ queryEmbeddings: [queryVector], nResults, where: { type: 'component' } });
+              }
+              return await coll.query({ queryTexts: [queryText], nResults, where: { type: 'component' } });
+            }
+
             // Try local first
             const localClient = await this.getLocalClient();
             try {
               const localColl = await localClient.getCollection({ name: 'component_patterns' });
-              results = await localColl.query({
-                queryTexts: [code],
-                nResults: limit,
-                where: { type: 'component' }
-              });
+              results = await queryCollection(localColl, code, limit);
             } catch (localError) {
               logDebug(`Local pattern search failed: ${localError.message}`);
             }
@@ -504,11 +536,7 @@ class ChromaContextMCP {
               try {
                 const remoteClient = await this.getRemoteClient();
                 const remoteColl = await remoteClient.getCollection({ name: 'component_patterns' });
-                results = await remoteColl.query({
-                  queryTexts: [code],
-                  nResults: limit,
-                  where: { type: 'component' }
-                });
+                results = await queryCollection(remoteColl, code, limit);
                 source = 'remote';
                 logDebug('Found patterns in remote ChromaDB');
               } catch (remoteError) {

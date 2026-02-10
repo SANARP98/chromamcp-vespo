@@ -16,10 +16,10 @@
  * - Temporary collections for quick load/unload
  */
 
-import { readdir, stat, readFile } from 'fs/promises';
+import { readdir, stat, readFile, open } from 'fs/promises';
 import { join, extname, basename, dirname, relative } from 'path';
 import { createHash } from 'crypto';
-import { logError } from './logger.js';
+import { logError, logWarn } from './logger.js';
 import { intelligentChunk } from './smart-chunker.js';
 
 // Lazy load EXIF extractor to avoid circular deps
@@ -241,15 +241,22 @@ async function extractCADMetadata(filePath) {
   return info;
 }
 
-// Read text content from file
+// Read text content from file (only reads up to maxSize bytes, avoiding full-file memory spikes)
 async function readTextContent(filePath, maxSize = 1024 * 100) { // 100KB max
   try {
     const stats = await stat(filePath);
-    if (stats.size > maxSize) {
-      const buffer = await readFile(filePath);
-      return buffer.slice(0, maxSize).toString('utf-8') + '\n\n[... truncated ...]';
+    if (stats.size <= maxSize) {
+      return await readFile(filePath, 'utf-8');
     }
-    return await readFile(filePath, 'utf-8');
+    // Read only the first maxSize bytes instead of the entire file
+    const fh = await open(filePath, 'r');
+    try {
+      const buffer = Buffer.alloc(maxSize);
+      await fh.read(buffer, 0, maxSize, 0);
+      return buffer.toString('utf-8') + '\n\n[... truncated ...]';
+    } finally {
+      await fh.close();
+    }
   } catch (error) {
     return `[Error reading file: ${error.message}]`;
   }
@@ -346,7 +353,7 @@ export async function processFile(filePath, options = {}) {
         };
       });
     } catch (error) {
-      console.warn(`Smart chunking failed for ${filePath}: ${error.message}. Falling back to simple chunking.`);
+      logWarn(`Smart chunking failed for ${filePath}: ${error.message}. Falling back to simple chunking.`);
       // Fall through to simple chunking
     }
   }

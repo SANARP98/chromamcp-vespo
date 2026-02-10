@@ -16,6 +16,7 @@
 import { watch } from 'fs';
 import { readFile, writeFile, stat, access, mkdir } from 'fs/promises';
 import { join, dirname } from 'path';
+import { homedir } from 'os';
 import { processFile, getFileCategory } from './batch-processor.js';
 import { extractExif, exifToMetadata, exifToSummary } from './exif-extractor.js';
 import { logDebug, logWarn, logError } from './logger.js';
@@ -24,7 +25,7 @@ import { logDebug, logWarn, logError } from './logger.js';
 const activeWatchers = new Map();
 
 // State file for persistence
-const STATE_FILE = join(process.env.HOME || '/tmp', '.chromadb-watchers.json');
+const STATE_FILE = join(homedir(), '.chromadb-watchers.json');
 
 /**
  * Load saved watcher state

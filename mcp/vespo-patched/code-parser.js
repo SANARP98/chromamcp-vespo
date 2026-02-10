@@ -5,6 +5,7 @@
 
 import { parse } from 'acorn';
 import { extname } from 'path';
+import { logWarn } from './logger.js';
 
 /**
  * Detect programming language from file path
@@ -77,7 +78,7 @@ export function parseJavaScript(code, filePath) {
 
   } catch (error) {
     // If parsing fails, fall back to whole file
-    console.warn(`Failed to parse JavaScript: ${error.message}`);
+    logWarn(`Failed to parse JavaScript: ${error.message}`);
     chunks.push({
       type: 'other',
       name: 'unparseable',
