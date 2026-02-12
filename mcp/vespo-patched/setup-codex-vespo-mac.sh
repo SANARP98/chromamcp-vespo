@@ -13,6 +13,10 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
+# Clean up any leftover temp files from previous broken runs
+rm -f /tmp/setup-codex-vespo-XXXXX.mjs
+rm -rf /tmp/setup-codex-vespo-*
+
 # Download setup script to temp file (.mjs for ES module support)
 TEMP_DIR="$(mktemp -d /tmp/setup-codex-vespo-XXXXX)"
 TEMP_SCRIPT="${TEMP_DIR}/setup-codex-vespo.mjs"
