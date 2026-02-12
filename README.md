@@ -85,7 +85,10 @@ cd /path/to/your/project
 codex
 ```
 
-Test that it's working:
+Test that it's working by first ingesting your repo, then listing collections:
+```
+Smart ingest all files from the current directory
+```
 ```
 List chroma collections
 ```
