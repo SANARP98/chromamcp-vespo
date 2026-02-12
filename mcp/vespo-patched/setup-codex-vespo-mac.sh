@@ -14,8 +14,9 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 
 # Download setup script to temp file (.mjs for ES module support)
-TEMP_SCRIPT="$(mktemp /tmp/setup-codex-vespo-XXXXX.mjs)"
-trap 'rm -f "$TEMP_SCRIPT"' EXIT
+TEMP_DIR="$(mktemp -d /tmp/setup-codex-vespo-XXXXX)"
+TEMP_SCRIPT="${TEMP_DIR}/setup-codex-vespo.mjs"
+trap 'rm -rf "$TEMP_DIR"' EXIT
 
 echo "Downloading ChromaDB MCP Server setup..."
 curl -fsSL "$SCRIPT_URL" -o "$TEMP_SCRIPT"
