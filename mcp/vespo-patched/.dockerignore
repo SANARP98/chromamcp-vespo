@@ -1,0 +1,47 @@
+# Dependencies (reinstalled during build)
+node_modules/
+bun.lockb
+
+# Environment secrets (NEVER bake into public images)
+.env
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Logs
+*.log
+npm-debug.log*
+
+# Build outputs
+dist/
+build/
+
+# Temporary files
+*.tmp
+.temp/
+tmp_backups/
+
+# Documentation (not needed in image)
+*.md
+ARCHITECTURE.md
+MULTIPLE_SESSIONS.md
+
+# Setup/uninstall scripts (not needed in image)
+setup-codex-vespo*
+uninstall-codex-vespo*
+
+# Docker
+Dockerfile
+.dockerignore
