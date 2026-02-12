@@ -25,5 +25,6 @@ trap 'rm -rf "$TEMP_DIR"' EXIT
 echo "Downloading ChromaDB MCP Server setup..."
 curl -fsSL "$SCRIPT_URL" -o "$TEMP_SCRIPT"
 
-# Run the setup
-exec node "$TEMP_SCRIPT"
+# Run the setup — redirect stdin from /dev/tty so interactive prompts work
+# even when this script is piped via curl | bash
+exec node "$TEMP_SCRIPT" </dev/tty
