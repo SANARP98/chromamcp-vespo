@@ -1,14 +1,24 @@
 #!/bin/bash
-# Wrapper for the uninstall script (macOS/Linux).
+# ChromaDB MCP Server - One-liner uninstaller for macOS/Linux
+# Usage: curl -fsSL https://raw.githubusercontent.com/SANARP98/chromamcp-vespo/main/mcp/vespo-patched/uninstall-codex-vespo-mac.sh | bash
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-UNINSTALL_SCRIPT="${SCRIPT_DIR}/uninstall-codex-vespo.js"
+REPO_BASE="https://raw.githubusercontent.com/SANARP98/chromamcp-vespo/main/mcp/vespo-patched"
+SCRIPT_URL="${REPO_BASE}/uninstall-codex-vespo.js"
 
+# Check for Node.js
 if ! command -v node >/dev/null 2>&1; then
-  echo "ERROR: node is required to run ${UNINSTALL_SCRIPT}" >&2
+  echo "ERROR: Node.js is required. Install it from https://nodejs.org" >&2
   exit 1
 fi
 
-exec node "${UNINSTALL_SCRIPT}"
+# Download uninstall script to temp file (.mjs for ES module support)
+TEMP_SCRIPT="$(mktemp /tmp/uninstall-codex-vespo-XXXXX.mjs)"
+trap 'rm -f "$TEMP_SCRIPT"' EXIT
+
+echo "Downloading ChromaDB MCP Server uninstaller..."
+curl -fsSL "$SCRIPT_URL" -o "$TEMP_SCRIPT"
+
+# Run the uninstaller
+exec node "$TEMP_SCRIPT"

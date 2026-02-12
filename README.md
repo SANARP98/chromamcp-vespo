@@ -6,21 +6,14 @@
 
 ## Quick Start
 
-### Step 1: Clone the Repository
-
-```bash
-git clone https://github.com/SANARP98/chromamcp-vespo.git
-cd chromamcp-vespo
-```
-
-### Step 2: Requirements
+### Requirements
 
 Before installing, ensure you have:
 
 1. **Docker Desktop** - [Download](https://docker.com)
    - Must be running before setup
 
-2. **Node.js** (v14+) - [Download](https://nodejs.org)
+2. **Node.js** (v18+) - [Download](https://nodejs.org)
    - Check: `node --version`
 
 3. **Codex CLI** - [Installation Guide](https://github.com/anthropics/claude-code)
@@ -30,35 +23,45 @@ Before installing, ensure you have:
 
 ## Installation
 
-> **Note:** If you have a previous installation, run the uninstall script first. During uninstall, you'll be asked whether to keep or remove existing data - select **Yes** or **No** based on your preference.
-
-### Uninstall Previous Installation (if applicable)
+No git clone needed. Just run one command:
 
 **macOS/Linux:**
 ```bash
-cd mcp/vespo-patched
-./uninstall-codex-vespo-mac.sh
+curl -fsSL https://raw.githubusercontent.com/SANARP98/chromamcp-vespo/main/mcp/vespo-patched/setup-codex-vespo-mac.sh | bash
 ```
 
-**Windows:**
+**Windows (PowerShell):**
 ```powershell
-cd mcp\vespo-patched
-.\uninstall-codex-vespo.ps1
+irm https://raw.githubusercontent.com/SANARP98/chromamcp-vespo/main/mcp/vespo-patched/setup-codex-vespo.ps1 | iex
 ```
 
-### Fresh Install
+The installer will:
+1. Pull the pre-built Docker image from GitHub Container Registry
+2. Start a ChromaDB container with persistent storage
+3. Prompt you for your OpenAI API key (for embeddings)
+4. Configure Codex CLI automatically
+
+### Uninstall
 
 **macOS/Linux:**
 ```bash
-cd mcp/vespo-patched
-./setup-codex-vespo-mac.sh
+curl -fsSL https://raw.githubusercontent.com/SANARP98/chromamcp-vespo/main/mcp/vespo-patched/uninstall-codex-vespo-mac.sh | bash
 ```
 
-**Windows:**
+**Windows (PowerShell):**
 ```powershell
-cd mcp\vespo-patched
-.\setup-codex-vespo.ps1
+irm https://raw.githubusercontent.com/SANARP98/chromamcp-vespo/main/mcp/vespo-patched/uninstall-codex-vespo.ps1 | iex
 ```
+
+### Docker Image
+
+The MCP server image is published to GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/sanarp98/chromamcp-vespo:latest
+```
+
+Available platforms: `linux/amd64` (Intel/AMD), `linux/arm64` (Apple Silicon, ARM)
 
 ---
 

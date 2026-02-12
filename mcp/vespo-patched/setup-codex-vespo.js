@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'child_process';
-import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
 import os from 'os';
@@ -10,11 +9,9 @@ import net from 'net';
 import http from 'http';
 
 const CONFIG = {
-  repoName: 'chromamcp-vespo',
-  repoUrl: 'https://github.com/SANARP98/chromamcp-vespo.git',
   networkName: 'chroma-net',
   containerName: 'chromadb-vespo',
-  imageName: 'chroma-mcp-vespo-patched:latest',
+  imageName: 'ghcr.io/sanarp98/chromamcp-vespo:latest',
   serverName: 'chromadb_context_vespo',
   chromaStartPort: 8003,
   chromaPortTries: 50,
@@ -22,25 +19,6 @@ const CONFIG = {
 };
 
 const IS_WINDOWS = process.platform === 'win32';
-
-// Detect system architecture and map to Docker platform
-function getDockerPlatform() {
-  const arch = os.arch();
-  // Map Node.js arch to Docker platform format
-  switch (arch) {
-    case 'arm64':
-      return 'linux/arm64';
-    case 'x64':
-    case 'x86_64':
-      return 'linux/amd64';
-    case 'arm':
-      return 'linux/arm/v7';
-    default:
-      // Default to amd64 for unknown architectures
-      logWarn(`Unknown architecture '${arch}', defaulting to linux/amd64`);
-      return 'linux/amd64';
-  }
-}
 
 function logInfo(message) {
   console.log(message);
@@ -129,21 +107,6 @@ async function findFreePort(startPort, maxTries) {
   throw new Error(`No free port found in range ${startPort}..${startPort + maxTries - 1}`);
 }
 
-function resolveDefaultInstallDir() {
-  const homeDir = os.homedir();
-  return path.join(homeDir, 'Documents');
-}
-
-async function ensureDirExists(dirPath) {
-  if (!fsSync.existsSync(dirPath)) {
-    const shouldCreate = await confirm(`Directory does not exist: ${dirPath}. Create it?`, false);
-    if (!shouldCreate) {
-      throw new Error('Installation cancelled by user.');
-    }
-    await fs.mkdir(dirPath, { recursive: true });
-  }
-}
-
 function ensurePrereqs() {
   const missing = [];
   if (!commandExists('codex')) {
@@ -151,12 +114,6 @@ function ensurePrereqs() {
   }
   if (!commandExists('docker')) {
     missing.push('Docker');
-  }
-  if (!commandExists('git')) {
-    missing.push('Git');
-  }
-  if (!commandExists('node')) {
-    missing.push('Node.js');
   }
 
   if (missing.length > 0) {
@@ -185,6 +142,10 @@ function writeFileIfChanged(filePath, content) {
 
 function getConfigPath() {
   return path.join(os.homedir(), '.codex', 'config.toml');
+}
+
+function getEnvFilePath() {
+  return path.join(os.homedir(), '.codex', 'chromamcp-vespo.env');
 }
 
 function stripServerConfig(configContent, serverName) {
@@ -252,28 +213,85 @@ async function waitForChroma(port, maxSeconds) {
   throw new Error(`ChromaDB failed to start within ${maxSeconds} seconds.`);
 }
 
-function buildImage(patchedPath, imageName) {
-  const platform = getDockerPlatform();
-  logInfo(`Detected architecture: ${os.arch()} -> Building for platform: ${platform}`);
-
-  runCommand('docker', ['build', '--platform', platform, '-t', imageName, '-f', 'Dockerfile', '.'], {
-    cwd: patchedPath,
-    stdio: 'inherit'
-  });
+function pullImage(imageName) {
+  logInfo(`Pulling image: ${imageName}`);
+  runCommand('docker', ['pull', imageName], { stdio: 'inherit' });
 }
 
-function testHandshake(networkName, containerName, imageName) {
+function testHandshake(networkName, containerName, imageName, envFilePath) {
   const payload = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}';
-  const result = runCommand('docker', [
+  const args = [
     'run', '--rm', '-i',
     '--network', networkName,
-    '-e', `CHROMA_URL=http://${containerName}:8000`,
-    imageName
-  ], { input: payload, allowFail: true });
+    '-e', `CHROMA_URL=http://${containerName}:8000`
+  ];
+
+  if (fsSync.existsSync(envFilePath)) {
+    args.push('--env-file', envFilePath);
+  }
+
+  args.push(imageName);
+
+  const result = runCommand('docker', args, { input: payload, allowFail: true });
 
   const combined = `${result.stdout || ''}${result.stderr || ''}`.trim();
   const firstLine = combined.split(/\r?\n/)[0] || '';
   return firstLine;
+}
+
+async function createEnvFile(envFilePath) {
+  // Check for existing .env file
+  if (fsSync.existsSync(envFilePath)) {
+    const existing = fsSync.readFileSync(envFilePath, 'utf-8');
+    logInfo(`Found existing env file: ${envFilePath}`);
+
+    const hasKey = existing.includes('OPENAI_API_KEY=') &&
+                   !existing.includes('OPENAI_API_KEY=sk-your-openai-api-key-here');
+    if (hasKey) {
+      const overwrite = await confirm('Existing .env file has an API key. Overwrite it?', false);
+      if (!overwrite) {
+        logInfo('Keeping existing .env file.');
+        return;
+      }
+    }
+  }
+
+  logInfo('');
+  logInfo('--- OpenAI API Key Setup ---');
+  logInfo('An OpenAI API key is required for the smart_ingest tool (embeddings).');
+  logInfo('Get one at: https://platform.openai.com/api-keys');
+  logInfo('');
+
+  const apiKey = await prompt('Enter your OpenAI API key (or press Enter to skip for now)');
+
+  const embeddingModel = await prompt(
+    'Embedding model',
+    'text-embedding-3-large'
+  );
+
+  const envContent = [
+    '# ChromaDB MCP Server Environment',
+    `# Generated on ${new Date().toISOString()}`,
+    '',
+    '# OpenAI API Key (required for smart_ingest tool)',
+    `OPENAI_API_KEY=${apiKey || 'sk-your-openai-api-key-here'}`,
+    '',
+    '# ChromaDB Connection',
+    `CHROMA_URL=http://${CONFIG.containerName}:8000`,
+    '',
+    '# OpenAI embedding model',
+    `OPENAI_EMBEDDING_MODEL=${embeddingModel}`,
+    ''
+  ].join('\n');
+
+  fsSync.mkdirSync(path.dirname(envFilePath), { recursive: true });
+  fsSync.writeFileSync(envFilePath, envContent, 'utf-8');
+  logInfo(`Env file written: ${envFilePath}`);
+
+  if (!apiKey) {
+    logWarn('No API key provided. Edit the file later to add your key:');
+    logWarn(`  ${envFilePath}`);
+  }
 }
 
 function buildWrapperScript(codexDir) {
@@ -449,60 +467,20 @@ function buildConfigSection({
   return header.join('\n');
 }
 
-function getDefaultRepoPath() {
-  const cwd = process.cwd();
-  const candidate = path.join(cwd, 'mcp', 'vespo-patched');
-  if (fsSync.existsSync(candidate)) {
-    return path.resolve(cwd);
-  }
-
-  if (path.basename(cwd) === 'vespo-patched') {
-    const repoRoot = path.resolve(cwd, '..', '..');
-    const patchedPath = path.join(repoRoot, 'mcp', 'vespo-patched');
-    if (fsSync.existsSync(patchedPath)) {
-      return repoRoot;
-    }
-  }
-
-  return null;
-}
-
 async function main() {
-  logInfo('=== Patched Vespo ChromaDB MCP Server Setup ===');
+  logInfo('=== ChromaDB MCP Server Setup (GHCR) ===');
 
   ensurePrereqs();
   ensureDockerRunning();
 
-  let repoRoot = getDefaultRepoPath();
+  // Step 1: Pull pre-built image from GHCR
+  pullImage(CONFIG.imageName);
 
-  if (!repoRoot) {
-    const defaultInstallDir = resolveDefaultInstallDir();
-    const installDir = await prompt('Installation directory', defaultInstallDir);
-    await ensureDirExists(installDir);
-
-    repoRoot = path.join(installDir, CONFIG.repoName);
-
-    if (fsSync.existsSync(repoRoot)) {
-      const overwrite = await confirm(`Repository already exists at ${repoRoot}. Delete and re-clone?`, false);
-      if (overwrite) {
-        await fs.rm(repoRoot, { recursive: true, force: true });
-      }
-    }
-
-    if (!fsSync.existsSync(repoRoot)) {
-      runCommand('git', ['clone', CONFIG.repoUrl, repoRoot], { stdio: 'inherit' });
-    }
-  }
-
-  const patchedPath = path.join(repoRoot, 'mcp', 'vespo-patched');
-  if (!fsSync.existsSync(patchedPath)) {
-    throw new Error(`Patched vespo server not found at ${patchedPath}`);
-  }
-
+  // Step 2: Docker network
   await ensureDockerNetwork(CONFIG.networkName);
   const chromaPort = await findFreePort(CONFIG.chromaStartPort, CONFIG.chromaPortTries);
 
-  // Check if container already exists
+  // Step 3: ChromaDB container
   const existing = runCommand('docker', ['ps', '-a', '--filter', `name=^${CONFIG.containerName}$`, '--format', '{{.Names}}'], { allowFail: true });
   if (existing.stdout?.trim()) {
     const isRunning = runCommand('docker', ['ps', '--filter', `name=^${CONFIG.containerName}$`, '--format', '{{.Names}}'], { allowFail: true });
@@ -511,7 +489,7 @@ async function main() {
       logInfo('ChromaDB container already running. Verifying health...');
       try {
         await waitForChroma(chromaPort, CONFIG.chromaReadySeconds);
-        logInfo('✓ Existing ChromaDB container is healthy. Skipping container recreation.');
+        logInfo('Existing ChromaDB container is healthy. Skipping container recreation.');
       } catch (error) {
         logWarn(`Existing container is unhealthy: ${error.message}`);
         const shouldRestart = await confirm('Restart the existing container?', true);
@@ -531,7 +509,7 @@ async function main() {
         logInfo('Starting existing container...');
         runCommand('docker', ['start', CONFIG.containerName], { stdio: 'inherit' });
         await waitForChroma(chromaPort, CONFIG.chromaReadySeconds);
-        logInfo('✓ Existing container started successfully.');
+        logInfo('Existing container started successfully.');
       }
     }
   }
@@ -555,7 +533,7 @@ async function main() {
 
     try {
       await waitForChroma(chromaPort, CONFIG.chromaReadySeconds);
-      logInfo('✓ ChromaDB is ready and responding to health checks.');
+      logInfo('ChromaDB is ready and responding to health checks.');
     } catch (error) {
       logError(`ChromaDB health check failed: ${error.message}`);
       logError('Cleaning up failed container...');
@@ -564,9 +542,12 @@ async function main() {
     }
   }
 
-  buildImage(patchedPath, CONFIG.imageName);
+  // Step 4: Create .env file
+  const envFilePath = getEnvFilePath();
+  await createEnvFile(envFilePath);
 
-  const handshake = testHandshake(CONFIG.networkName, CONFIG.containerName, CONFIG.imageName);
+  // Step 5: Test MCP handshake
+  const handshake = testHandshake(CONFIG.networkName, CONFIG.containerName, CONFIG.imageName, envFilePath);
   if (handshake.includes('"result"')) {
     logInfo('MCP handshake looks healthy.');
   } else if (handshake) {
@@ -575,31 +556,30 @@ async function main() {
     logWarn('Handshake produced no output.');
   }
 
+  // Step 6: Create wrapper script
   const codexDir = path.join(os.homedir(), '.codex');
   const wrapperPath = buildWrapperScript(codexDir);
 
+  // Step 7: Configure Codex CLI
   const configPath = getConfigPath();
   const existingConfig = fsSync.existsSync(configPath)
     ? fsSync.readFileSync(configPath, 'utf-8')
     : '';
   const cleanedConfig = stripServerConfig(existingConfig, CONFIG.serverName);
 
-  // Note: No --name flag to allow multiple concurrent Codex sessions
-  // Docker will auto-generate unique names with --rm flag
   let command = wrapperPath;
   let args = [
     'run', '--rm', '-i',
     '--network', CONFIG.networkName,
+    '--env-file', envFilePath,
     '-e', `CHROMA_URL=http://${CONFIG.containerName}:8000`,
-    '-e', `CHROMADB_URL=http://${CONFIG.containerName}:8000`,
     '-v', 'PLACEHOLDER:/workspace:ro',
     CONFIG.imageName
   ];
   let envVars = ['PWD'];
-  let extraComment = 'Uses dynamic workspace mounting (supports multiple concurrent sessions)';
+  let extraComment = 'Uses pre-built GHCR image with dynamic workspace mounting';
 
   if (IS_WINDOWS) {
-    // Use Node.js to run the wrapper (avoids PowerShell -i parameter parsing issue)
     command = 'node';
     args = [wrapperPath, ...args];
   }
@@ -616,12 +596,15 @@ async function main() {
   writeFileIfChanged(configPath, finalConfig);
 
   logInfo('');
-  logInfo('Setup complete.');
-  logInfo(`Repo: ${repoRoot}`);
+  logInfo('=== Setup complete ===');
+  logInfo(`Image:    ${CONFIG.imageName}`);
   logInfo(`ChromaDB: http://localhost:${chromaPort}`);
-  logInfo(`Config: ${configPath}`);
-  logInfo(`Wrapper: ${wrapperPath}`);
+  logInfo(`Env file: ${envFilePath}`);
+  logInfo(`Config:   ${configPath}`);
+  logInfo(`Wrapper:  ${wrapperPath}`);
+  logInfo('');
   logInfo('Next: restart VS Code and start a new Codex chat.');
+  logInfo(`To update your API key later, edit: ${envFilePath}`);
 }
 
 main().catch(error => {

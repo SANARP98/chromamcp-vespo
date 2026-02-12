@@ -10,13 +10,15 @@ const CONFIG = {
   networkName: 'chroma-net',
   containerName: 'chromadb-vespo',
   mcpContainerName: 'chromadb-mcp-server',
-  imageName: 'chroma-mcp-vespo-patched:latest',
+  imageName: 'ghcr.io/sanarp98/chromamcp-vespo:latest',
+  legacyImageName: 'chroma-mcp-vespo-patched:latest',
   chromaImageName: 'chromadb/chroma:latest',
   chromaImagePinned: 'chromadb/chroma:0.5.23',
   volumeName: 'chromadb-vespo-data',
   serverName: 'chromadb_context_vespo',
   dockerWrapperPathUnix: path.join(os.homedir(), '.codex', 'docker-wrapper.sh'),
   dockerWrapperPathWindows: path.join(os.homedir(), '.codex', 'docker-wrapper.ps1'),
+  envFilePath: path.join(os.homedir(), '.codex', 'chromamcp-vespo.env'),
   configPath: path.join(os.homedir(), '.codex', 'config.toml')
 };
 
@@ -113,17 +115,19 @@ function volumeExists(name) {
 }
 
 function findOrphanedMcpContainers() {
-  // Find containers created from the MCP image that may have auto-generated names
-  try {
-    const result = runCommand('docker', [
-      'ps', '-a',
-      '--filter', 'ancestor=chroma-mcp-vespo-patched:latest',
-      '--format', '{{.Names}}'
-    ]);
-    return result.stdout.split('\n').filter(name => name.trim() !== '');
-  } catch {
-    return [];
+  // Find containers created from both GHCR and legacy MCP images
+  const names = new Set();
+  for (const img of [CONFIG.imageName, CONFIG.legacyImageName]) {
+    try {
+      const result = runCommand('docker', [
+        'ps', '-a',
+        '--filter', `ancestor=${img}`,
+        '--format', '{{.Names}}'
+      ]);
+      result.stdout.split('\n').filter(n => n.trim() !== '').forEach(n => names.add(n));
+    } catch {}
   }
+  return [...names];
 }
 
 function findOrphanedChromaContainers() {
@@ -350,6 +354,7 @@ async function main() {
       logInfo(`  Additional containers (auto-named): ${allOrphanedContainers.join(', ')}`);
     }
     if (imageExists(CONFIG.imageName)) logInfo(`  Image: ${CONFIG.imageName}`);
+    if (imageExists(CONFIG.legacyImageName)) logInfo(`  Image: ${CONFIG.legacyImageName} (legacy)`);
     if (imageExists(CONFIG.chromaImageName)) logInfo(`  Image: ${CONFIG.chromaImageName}`);
     if (imageExists(CONFIG.chromaImagePinned)) logInfo(`  Image: ${CONFIG.chromaImagePinned}`);
     if (volumeExists(CONFIG.volumeName)) logInfo(`  Volume: ${CONFIG.volumeName} (contains your indexed data)`);
@@ -366,11 +371,11 @@ async function main() {
     }
 
     // Prompt for images
-    const hasImages = imageExists(CONFIG.imageName) || imageExists(CONFIG.chromaImageName) || imageExists(CONFIG.chromaImagePinned);
+    const hasImages = imageExists(CONFIG.imageName) || imageExists(CONFIG.legacyImageName) || imageExists(CONFIG.chromaImageName) || imageExists(CONFIG.chromaImagePinned);
     if (hasImages) {
       console.log();
       removeImages = await confirm(
-        'Remove Docker images (chroma-mcp-vespo-patched, chromadb/chroma)?',
+        'Remove Docker images (chromamcp-vespo, chromadb/chroma)?',
         false
       );
     }
@@ -407,6 +412,7 @@ async function main() {
     console.log();
     logInfo('=== Removing Docker Images ===');
     removeImage(CONFIG.imageName);
+    removeImage(CONFIG.legacyImageName);
     removeImage(CONFIG.chromaImageName);
     removeImage(CONFIG.chromaImagePinned);
   }
@@ -428,6 +434,20 @@ async function main() {
   console.log();
   logInfo('=== Removing Docker Wrapper Scripts ===');
   removeDockerWrapper();
+
+  // Remove env file
+  console.log();
+  logInfo('=== Removing Environment File ===');
+  if (fs.existsSync(CONFIG.envFilePath)) {
+    try {
+      fs.unlinkSync(CONFIG.envFilePath);
+      logSuccess(`Env file removed: ${CONFIG.envFilePath}`);
+    } catch (error) {
+      logWarn(`Failed to remove env file: ${error.message}`);
+    }
+  } else {
+    logInfo('Env file not found, skipping.');
+  }
 
   // Always clean Codex config
   console.log();
@@ -458,6 +478,7 @@ async function main() {
     console.log('  ✓ Docker network removed (if unused)');
   }
   console.log('  ✓ Docker wrapper scripts removed');
+  console.log('  ✓ Environment file removed');
   console.log('  ✓ Codex CLI configuration cleaned');
   console.log();
   logWarn('Please restart VS Code to apply Codex CLI configuration changes.');
