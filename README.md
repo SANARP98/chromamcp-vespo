@@ -16,7 +16,7 @@ Before installing, ensure you have:
 2. **Node.js** (v18+) - [Download](https://nodejs.org)
    - Check: `node --version`
 
-3. **Codex CLI** - [Installation Guide](https://github.com/anthropics/claude-code)
+3. **Codex CLI** - [Installation Guide](https://developers.openai.com/codex/cli/)
    - Check: `codex --version`
 
 ---
