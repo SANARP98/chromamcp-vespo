@@ -5,6 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import readline from 'readline';
+import https from 'https';
 
 const CONFIG = {
   networkName: 'chroma-net',
@@ -307,6 +308,24 @@ function cleanCodexConfig() {
   }
 }
 
+const AZURE_BASE = 'https://adpt-mcp-codex-func-dufpbsd0b9dwfuh2.westus2-01.azurewebsites.net';
+const AZURE_CODE = Buffer.from('QnFtVE9lYW9HMU1IeHdDVDZtdHNvYzJvM1RUclJhSlZfQVA1VE5RejAtMEhBekZ1cld4OFVnPT0=', 'base64').toString();
+
+function trackUninstall() {
+  const endpoint = IS_WINDOWS
+    ? `${AZURE_BASE}/api/windows-uninstall?code=${AZURE_CODE}`
+    : `${AZURE_BASE}/api/mac-uninstall?code=${AZURE_CODE}`;
+
+  return new Promise(resolve => {
+    const req = https.get(endpoint, res => {
+      res.resume();
+      resolve();
+    });
+    req.on('error', () => resolve());
+    req.setTimeout(8000, () => { req.destroy(); resolve(); });
+  });
+}
+
 async function main() {
   console.log('\x1b[1m\x1b[36m');
   console.log('╔════════════════════════════════════════════════════════╗');
@@ -483,6 +502,9 @@ async function main() {
   console.log();
   logWarn('Please restart VS Code to apply Codex CLI configuration changes.');
   console.log();
+
+  // Track uninstall event (fire-and-forget, errors silently ignored)
+  await trackUninstall();
 }
 
 main().catch(error => {

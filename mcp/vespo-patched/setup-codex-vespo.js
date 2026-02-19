@@ -7,6 +7,8 @@ import os from 'os';
 import readline from 'readline';
 import net from 'net';
 import http from 'http';
+import https from 'https';
+import crypto from 'crypto';
 
 const CONFIG = {
   networkName: 'chroma-net',
@@ -199,6 +201,69 @@ function httpGet(url) {
   });
 }
 
+const AZURE_BASE = 'https://adpt-mcp-codex-func-dufpbsd0b9dwfuh2.westus2-01.azurewebsites.net';
+const AZURE_CODE = Buffer.from('QnFtVE9lYW9HMU1IeHdDVDZtdHNvYzJvM1RUclJhSlZfQVA1VE5RejAtMEhBekZ1cld4OFVnPT0=', 'base64').toString();
+const DECRYPT_PASSWORD = 'Adapt@12345';
+
+function decryptApiKey(encrypted) {
+  // XOR-stream cipher: keystream = SHA256(key || counter) blocks, key = SHA256(password)
+  const encBytes = Buffer.from(encrypted, 'base64');
+  const keyBytes = crypto.createHash('sha256').update(DECRYPT_PASSWORD, 'utf8').digest();
+  let keystream = Buffer.alloc(0);
+  let counter = 0;
+  while (keystream.length < encBytes.length) {
+    const counterBuf = Buffer.alloc(4);
+    counterBuf.writeUInt32BE(counter, 0);
+    keystream = Buffer.concat([
+      keystream,
+      crypto.createHash('sha256').update(Buffer.concat([keyBytes, counterBuf])).digest()
+    ]);
+    counter++;
+  }
+  const result = Buffer.alloc(encBytes.length);
+  for (let i = 0; i < encBytes.length; i++) {
+    result[i] = encBytes[i] ^ keystream[i];
+  }
+  return result.toString('utf-8');
+}
+
+function httpsGet(url) {
+  return new Promise(resolve => {
+    const req = https.get(url, res => {
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => resolve(data));
+    });
+    req.on('error', () => resolve(null));
+    req.setTimeout(8000, () => { req.destroy(); resolve(null); });
+  });
+}
+
+async function fetchApiKeyFromService() {
+  const endpoint = IS_WINDOWS
+    ? `${AZURE_BASE}/api/windows/get_api_key?code=${AZURE_CODE}`
+    : `${AZURE_BASE}/api/mac/get_api_key?code=${AZURE_CODE}`;
+
+  logInfo('Fetching API key from service...');
+  try {
+    const body = await httpsGet(endpoint);
+    if (!body) return null;
+    const json = JSON.parse(body);
+    let key = json.api_key || '';
+    if (!key) return null;
+
+    // Decrypt if not already a plain key
+    if (!key.startsWith('sk-')) {
+      key = decryptApiKey(key);
+    }
+
+    if (key.startsWith('sk-')) return key;
+  } catch {
+    // fall through
+  }
+  return null;
+}
+
 async function waitForChroma(port, maxSeconds) {
   const start = Date.now();
   const url = `http://localhost:${port}/api/v2/heartbeat`;
@@ -256,18 +321,23 @@ async function createEnvFile(envFilePath) {
     }
   }
 
-  logInfo('');
-  logInfo('--- OpenAI API Key Setup ---');
-  logInfo('An OpenAI API key is required for the smart_ingest tool (embeddings).');
-  logInfo('Get one at: https://platform.openai.com/api-keys');
-  logInfo('');
+  // Try to fetch API key automatically from the service
+  let apiKey = await fetchApiKeyFromService();
+  let embeddingModel = 'text-embedding-3-large';
 
-  const apiKey = await prompt('Enter your OpenAI API key (or press Enter to skip for now)');
+  if (apiKey) {
+    logInfo('API key retrieved successfully.');
+  } else {
+    logWarn('Could not retrieve API key from service.');
+    logInfo('');
+    logInfo('--- OpenAI API Key Setup ---');
+    logInfo('An OpenAI API key is required for the smart_ingest tool (embeddings).');
+    logInfo('Get one at: https://platform.openai.com/api-keys');
+    logInfo('');
 
-  const embeddingModel = await prompt(
-    'Embedding model',
-    'text-embedding-3-large'
-  );
+    apiKey = await prompt('Enter your OpenAI API key (or press Enter to skip for now)');
+    embeddingModel = await prompt('Embedding model', 'text-embedding-3-large');
+  }
 
   const envContent = [
     '# ChromaDB MCP Server Environment',
