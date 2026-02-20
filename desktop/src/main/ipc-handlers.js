@@ -17,6 +17,13 @@ import { homedir } from 'os'
 import { runMcpTool, getDbPath, getMcpServerPath } from './mcp-runner'
 import { checkAndUpdateCodexConfig, readCodexConfigStatus } from './codex-config'
 import { getSettings, saveSettings } from './store'
+import {
+  startWatching,
+  stopWatching,
+  isWatching,
+  getWatcherStats,
+  collectionNameFromPath
+} from './directory-watcher'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -56,6 +63,18 @@ function formatBytes(bytes) {
   if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`
   if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`
   return `${(bytes / 1024 ** 3).toFixed(1)} GB`
+}
+
+function formatRelativeTime(isoString) {
+  if (!isoString) return null
+  const diff = Date.now() - new Date(isoString).getTime()
+  const s = Math.floor(diff / 1000)
+  if (s < 60) return `${s}s ago`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  return `${Math.floor(h / 24)}d ago`
 }
 
 // ─── Register all handlers ────────────────────────────────────────────────────
@@ -192,4 +211,96 @@ export function registerIpcHandlers(_ipcMain, getWindow, emit) {
       return { success: false, error: e.message }
     }
   })
+
+  // ── Tracked directories ───────────────────────────────────────────────────
+
+  /**
+   * Return all tracked directories merged with live watcher stats.
+   * Shape: [{ path, collection, addedAt, active, filesIngested, lastIngest, lastIngestRel }]
+   */
+  ipcMain.handle('vespo:get-tracked-dirs', async () => {
+    const settings = await getSettings()
+    const liveStats = getWatcherStats() // from in-memory registry
+    const liveMap = new Map(liveStats.map(s => [s.path, s]))
+
+    return (settings.trackedDirectories || []).map(dir => {
+      const live = liveMap.get(dir.path) || {}
+      return {
+        path: dir.path,
+        collection: dir.collection,
+        addedAt: dir.addedAt,
+        active: isWatching(dir.path),
+        filesIngested: live.filesIngested ?? 0,
+        lastIngest: live.lastIngest ?? null,
+        lastIngestRel: formatRelativeTime(live.lastIngest),
+      }
+    })
+  })
+
+  /**
+   * Add a directory to persistent tracking and start the fs watcher.
+   * collection is auto-derived from the dir name if not provided.
+   */
+  ipcMain.handle('vespo:add-tracked-dir', async (_e, { path: dirPath, collection }) => {
+    if (!dirPath) return { success: false, error: 'No path provided' }
+
+    const resolvedCollection = collection || collectionNameFromPath(dirPath)
+
+    // Start the watcher first
+    const settings = await getSettings()
+    const watchResult = startWatching(dirPath, {
+      collection: resolvedCollection,
+      openaiApiKey: settings.openaiApiKey || ''
+    }, emit)
+
+    if (!watchResult.success) {
+      return { success: false, error: watchResult.error }
+    }
+
+    // Persist to settings
+    const existing = (settings.trackedDirectories || [])
+    const alreadyTracked = existing.some(d => d.path === dirPath)
+    if (!alreadyTracked) {
+      await saveSettings({
+        trackedDirectories: [
+          ...existing,
+          { path: dirPath, collection: resolvedCollection, addedAt: new Date().toISOString() }
+        ]
+      })
+    }
+
+    emit('success', `Now watching: ${dirPath}`)
+    return { success: true, collection: resolvedCollection }
+  })
+
+  /**
+   * Remove a tracked directory — stops the watcher and removes from settings.
+   */
+  ipcMain.handle('vespo:remove-tracked-dir', async (_e, { path: dirPath }) => {
+    stopWatching(dirPath)
+
+    const settings = await getSettings()
+    await saveSettings({
+      trackedDirectories: (settings.trackedDirectories || []).filter(d => d.path !== dirPath)
+    })
+
+    emit('info', `Stopped watching: ${dirPath}`)
+    return { success: true }
+  })
+}
+
+/**
+ * Called at startup to resume watching all tracked directories from settings.
+ * `emit` is the same function used by the IPC handlers.
+ */
+export async function restoreWatchers(settings, emit) {
+  const dirs = settings.trackedDirectories || []
+  for (const dir of dirs) {
+    if (!isWatching(dir.path)) {
+      startWatching(dir.path, {
+        collection: dir.collection,
+        openaiApiKey: settings.openaiApiKey || ''
+      }, emit)
+    }
+  }
 }

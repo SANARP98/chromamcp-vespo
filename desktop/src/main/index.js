@@ -1,8 +1,10 @@
 import { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, dialog } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
-import { registerIpcHandlers } from './ipc-handlers'
+import { registerIpcHandlers, restoreWatchers } from './ipc-handlers'
 import { checkAndUpdateCodexConfig } from './codex-config'
+import { getSettings } from './store'
+import { stopAllWatchers } from './directory-watcher'
 
 // Keep strong references to prevent GC
 let mainWindow = null
@@ -103,6 +105,16 @@ app.whenReady().then(async () => {
     emit('error', `Codex config: ${e.message}`)
   }
 
+  // Restore persistent directory watchers from settings
+  try {
+    const settings = await getSettings()
+    await restoreWatchers(settings, emit)
+    const count = (settings.trackedDirectories || []).length
+    if (count > 0) emit('info', `Resumed ${count} watched director${count === 1 ? 'y' : 'ies'}`)
+  } catch (e) {
+    emit('error', `Failed to restore watchers: ${e.message}`)
+  }
+
   emit('success', 'Ready')
 
   app.on('activate', () => {
@@ -112,5 +124,9 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('before-quit', () => {
+  stopAllWatchers()
 })
 

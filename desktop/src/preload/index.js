@@ -32,6 +32,11 @@ contextBridge.exposeInMainWorld('vespo', {
   // ── Codex config ─────────────────────────────────────────────────────────
   refreshCodexConfig: () => ipcRenderer.invoke('vespo:refresh-codex-config'),
 
+  // ── Tracked directories ───────────────────────────────────────────────────
+  getTrackedDirs: () => ipcRenderer.invoke('vespo:get-tracked-dirs'),
+  addTrackedDir: (path, collection) => ipcRenderer.invoke('vespo:add-tracked-dir', { path, collection }),
+  removeTrackedDir: (path) => ipcRenderer.invoke('vespo:remove-tracked-dir', { path }),
+
   // ── Activity log (main → renderer push) ─────────────────────────────────
   onActivity: (callback) => {
     const handler = (_event, entry) => callback(entry)

@@ -13,7 +13,9 @@ const defaults = {
   dbPath: join(homedir(), '.vespo', 'lancedb'),
   localhostApiEnabled: false,
   localhostApiPort: 3847,
-  launchOnLogin: false
+  launchOnLogin: false,
+  // Persistently watched directories: [{ path, collection, addedAt }]
+  trackedDirectories: []
 }
 
 function settingsPath() {
