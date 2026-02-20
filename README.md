@@ -92,7 +92,7 @@ Smart ingest all files from the current directory
 ```
 List chroma collections
 ```
-
+### Now you can start asking questions to Codex "Use context and __________(your questions or improvements for code)________________
 ---
 
 ## Prompt Examples
