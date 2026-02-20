@@ -97,7 +97,11 @@ export function parseTerraform(code, filePath) {
         endChar: startChar + content.length,
         content,
         signature,
-        docstring: null
+        docstring: null,
+        // Terraform-specific structured fields (queryable via ChromaDB where filters)
+        tf_block_type:    blockType,
+        tf_resource_type: labels[0] || null,  // e.g. "aws_s3_bucket"
+        tf_resource_name: labels[1] || null   // e.g. "main"
       });
 
       i = blockEnd + 1;
@@ -117,7 +121,10 @@ export function parseTerraform(code, filePath) {
       endChar: code.length,
       content: code,
       signature: null,
-      docstring: null
+      docstring: null,
+      tf_block_type:    null,
+      tf_resource_type: null,
+      tf_resource_name: null
     });
   }
 
@@ -178,6 +185,11 @@ function splitYAMLByDocuments(code, lines, sepPattern) {
 
     const startChar = lines.slice(0, start).join('\n').length + (start > 0 ? 1 : 0);
 
+    // Extract additional Kubernetes / multi-doc YAML metadata
+    const apiVersionM = content.match(/^apiVersion:\s*(\S+)/m);
+    const namespaceM  = content.match(/^  namespace:\s*(\S+)/m) ||
+                        content.match(/^    namespace:\s*(\S+)/m);
+
     chunks.push({
       type: 'document',
       name: docName,
@@ -187,7 +199,13 @@ function splitYAMLByDocuments(code, lines, sepPattern) {
       endChar: startChar + content.length,
       content,
       signature: kindM ? `kind: ${kindM[1]}` : null,
-      docstring: null
+      docstring: null,
+      // YAML-specific structured fields (queryable via ChromaDB where filters)
+      yaml_strategy:    'document_separator',
+      yaml_kind:        kindM        ? kindM[1]        : null,  // e.g. "Deployment"
+      yaml_api_version: apiVersionM  ? apiVersionM[1]  : null,  // e.g. "apps/v1"
+      yaml_namespace:   namespaceM   ? namespaceM[1]   : null,  // e.g. "production"
+      yaml_top_key:     null
     });
     docIdx++;
   };
@@ -234,7 +252,12 @@ function splitYAMLByTopLevelKeys(code, lines) {
       endChar: code.length,
       content: code,
       signature: null,
-      docstring: null
+      docstring: null,
+      yaml_strategy:    'top_level_keys',
+      yaml_kind:        null,
+      yaml_api_version: null,
+      yaml_namespace:   null,
+      yaml_top_key:     null
     }];
   }
 
@@ -256,7 +279,12 @@ function splitYAMLByTopLevelKeys(code, lines) {
       endChar: startChar + content.length,
       content,
       signature: `${keyPositions[k].key}:`,
-      docstring: null
+      docstring: null,
+      yaml_strategy:    'top_level_keys',
+      yaml_kind:        null,
+      yaml_api_version: null,
+      yaml_namespace:   null,
+      yaml_top_key:     keyPositions[k].key  // e.g. "jobs", "services", "env"
     });
   }
 

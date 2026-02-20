@@ -302,14 +302,24 @@ async function enrichChunkMetadata(chunk, fullContent, filePath, options) {
   // Calculate lines of code (non-comment, non-blank)
   const loc = calculateLOC(chunk.content);
 
-  // Calculate complexity estimate
-  const complexity = calculateComplexity ? estimateComplexity(chunk.content) : 0;
+  // Complexity metric and importance score differ by language family.
+  // Config formats use structural metrics; cyclomatic complexity is meaningless for them.
+  let complexity;
+  let score;
 
-  // Calculate chunk score (importance)
-  const score = scoreChunk(chunk);
+  if (languageOverride === 'terraform') {
+    complexity = countTerraformAttributes(chunk.content); // # of key = value assignments
+    score      = scoreConfigChunk(chunk, 'terraform');
+  } else if (languageOverride === 'yaml') {
+    complexity = maxYAMLNestingDepth(chunk.content);      // deepest indent level
+    score      = scoreConfigChunk(chunk, 'yaml');
+  } else {
+    complexity = calculateComplexity ? estimateComplexity(chunk.content) : 0;
+    score      = scoreChunk(chunk);
+  }
 
-  // Determine if public/exported
-  const isPublic = chunk.name && !chunk.name.startsWith('_');
+  // Determine if public/exported (code-language concept only)
+  const isPublic   = chunk.name && !chunk.name.startsWith('_');
   const isExported = chunk.isExported || false;
 
   return {
@@ -317,39 +327,60 @@ async function enrichChunkMetadata(chunk, fullContent, filePath, options) {
     metadata: {
       // Type information
       chunk_type: chunk.type,
-      name: chunk.name,
-      language: languageOverride || detectLanguage(filePath),
+      name:       chunk.name,
+      language:   languageOverride || detectLanguage(filePath),
 
       // Position
       start_line: chunk.startLine,
-      end_line: chunk.endLine,
+      end_line:   chunk.endLine,
       start_char: chunk.startChar,
-      end_char: chunk.endChar,
+      end_char:   chunk.endChar,
       line_count: chunk.endLine - chunk.startLine + 1,
       char_count: chunk.content.length,
 
       // Chunking info
-      is_partial: chunk.isPartial || false,
-      part_number: chunk.partNumber !== undefined ? chunk.partNumber : 0,
-      total_parts: chunk.totalParts !== undefined ? chunk.totalParts : 1,
+      is_partial:   chunk.isPartial || false,
+      part_number:  chunk.partNumber  !== undefined ? chunk.partNumber  : 0,
+      total_parts:  chunk.totalParts  !== undefined ? chunk.totalParts  : 1,
       parent_chunk: chunk.parentChunk || null,
 
-      // Code analysis
-      signature: chunk.signature || null,
+      // Code analysis (meaningful for JS / TS / Python)
+      signature:    chunk.signature || null,
       has_docstring: !!chunk.docstring,
-      docstring: chunk.docstring || null,
-      decorators: chunk.decorators ? chunk.decorators.join(', ') : null,
+      docstring:    chunk.docstring || null,
+      decorators:   chunk.decorators ? chunk.decorators.join(', ') : null,
 
       // Metrics
+      // complexity_estimate = cyclomatic for code | attribute count for TF | nesting depth for YAML
       complexity_estimate: complexity,
-      loc: loc,
+      loc:         loc,
       chunk_score: score,
 
-      // Flags
-      is_public: isPublic,
-      is_exported: isExported,
-      is_async: chunk.isAsync || false,
+      // Flags (code-language concepts; false/null for config)
+      is_public:    isPublic,
+      is_exported:  isExported,
+      is_async:     chunk.isAsync     || false,
       is_generator: chunk.isGenerator || false,
+
+      // ── Terraform-specific fields ──────────────────────────────────────────
+      // Queryable: where: { tf_block_type: "resource", tf_resource_type: "aws_s3_bucket" }
+      ...(languageOverride === 'terraform' ? {
+        tf_block_type:      chunk.tf_block_type    || null,
+        tf_resource_type:   chunk.tf_resource_type || null,
+        tf_resource_name:   chunk.tf_resource_name || null,
+        tf_attribute_count: complexity
+      } : {}),
+
+      // ── YAML-specific fields ───────────────────────────────────────────────
+      // Queryable: where: { yaml_kind: "Deployment" } or { yaml_top_key: "jobs" }
+      ...(languageOverride === 'yaml' ? {
+        yaml_strategy:    chunk.yaml_strategy    || null,
+        yaml_kind:        chunk.yaml_kind        || null,
+        yaml_api_version: chunk.yaml_api_version || null,
+        yaml_namespace:   chunk.yaml_namespace   || null,
+        yaml_top_key:     chunk.yaml_top_key     || null,
+        yaml_max_depth:   complexity
+      } : {}),
 
       // Preview (first 200 chars)
       preview: chunk.content.substring(0, 200).replace(/\n/g, ' ').trim()
@@ -441,4 +472,130 @@ function scoreChunk(chunk) {
   if (chunk.isGenerator) score += 0.5;
 
   return Math.min(Math.round(score), 10);
+}
+
+// ─────────────────────────────────────────────
+// Config-specific metrics
+// ─────────────────────────────────────────────
+
+/**
+ * Count HCL attribute assignments inside a Terraform block.
+ * Used as a structural complexity substitute (cyclomatic is meaningless for HCL).
+ * Matches lines like:  ami           = "ami-0c55b159cbfafe1f0"
+ *                      instance_type = var.instance_type
+ * Excludes block headers that end with `{`.
+ */
+function countTerraformAttributes(content) {
+  let count = 0;
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (/^\w+\s*=\s*/.test(trimmed) && !trimmed.endsWith('{')) {
+      count++;
+    }
+  }
+  return count;
+}
+
+/**
+ * Find the maximum nesting depth in YAML content by indentation level.
+ * Each 2-space indent = 1 depth level.
+ * Used as a structural complexity substitute for YAML chunks.
+ */
+function maxYAMLNestingDepth(content) {
+  let maxDepth = 0;
+  for (const line of content.split('\n')) {
+    if (!line.trim() || line.trim().startsWith('#')) continue;
+    const indent = line.length - line.trimStart().length;
+    const depth = Math.ceil(indent / 2);
+    if (depth > maxDepth) maxDepth = depth;
+  }
+  return maxDepth;
+}
+
+// Importance scores for Terraform top-level block types (0-10 scale).
+// Resources and modules are the primary targets of infrastructure queries.
+const TF_BLOCK_SCORES = {
+  resource:  8,  // Infrastructure definitions — most searched
+  module:    7,  // Module calls — reusable components
+  data:      7,  // Data sources — commonly referenced
+  output:    6,  // Exported values
+  variable:  6,  // Input interface
+  check:     5,  // Health checks
+  provider:  5,  // Provider configuration
+  terraform: 5,  // Terraform settings block
+  locals:    4,  // Local value helpers
+  moved:     3,  // Refactoring metadata
+  import:    3,  // Import existing resources
+  removed:   3   // Removal metadata
+};
+
+// Importance scores for well-known YAML top-level keys.
+// Higher = more likely to be the primary chunk a query targets.
+const YAML_KEY_SCORES = {
+  // CI/CD
+  jobs:        8,  // GitHub Actions jobs / GitLab CI jobs
+  stages:      8,  // GitLab CI stages
+  pipeline:    8,
+  // Docker Compose
+  services:    8,  // Service definitions
+  volumes:     6,
+  networks:    5,
+  // Kubernetes / general
+  spec:        7,
+  containers:  8,
+  // Config / settings
+  config:      6,
+  settings:    6,
+  env:         5,
+  environment: 5,
+  // Helm / templates
+  image:       7,
+  ingress:     7,
+  resources:   6
+};
+
+// Importance scores for Kubernetes Kind values.
+// Workload and network resources are the most query-relevant.
+const K8S_KIND_SCORES = {
+  Deployment:                 9,
+  StatefulSet:                8,
+  DaemonSet:                  8,
+  CronJob:                    7,
+  Job:                        7,
+  Service:                    8,
+  Ingress:                    8,
+  ConfigMap:                  6,
+  Secret:                     7,
+  ServiceAccount:             5,
+  Role:                       6,
+  ClusterRole:                6,
+  RoleBinding:                5,
+  ClusterRoleBinding:         5,
+  HorizontalPodAutoscaler:    7,
+  PersistentVolumeClaim:      6,
+  PersistentVolume:           5,
+  Namespace:                  5
+};
+
+/**
+ * Score a config chunk (Terraform or YAML) by structural importance.
+ * Returns 0-10. Replaces the code-oriented scoreChunk() for config languages.
+ */
+function scoreConfigChunk(chunk, language) {
+  if (language === 'terraform') {
+    return TF_BLOCK_SCORES[chunk.type] ?? 5;
+  }
+
+  if (language === 'yaml') {
+    if (chunk.type === 'document') {
+      // Score Kubernetes documents by kind; fall back to 6 for unknown kinds
+      const kind = chunk.yaml_kind;
+      return kind ? (K8S_KIND_SCORES[kind] ?? 6) : 5;
+    }
+    if (chunk.type === 'key') {
+      return YAML_KEY_SCORES[chunk.name] ?? 5;
+    }
+  }
+
+  return 5;
 }
