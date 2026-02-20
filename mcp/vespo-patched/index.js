@@ -9,7 +9,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { ChromaClient } from 'chromadb';
+import { ChromaClient } from './lancedb-adapter.js';
 import { writeFile, readFile, readdir, stat } from 'fs/promises';
 import { join } from 'path';
 import { logDebug, logWarn, logError } from './logger.js';
