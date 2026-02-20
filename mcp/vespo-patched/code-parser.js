@@ -23,7 +23,10 @@ export function detectLanguage(filePath) {
     '.mjs': 'javascript',
     '.cjs': 'javascript',
     '.py': 'python',
-    '.pyw': 'python'
+    '.pyw': 'python',
+    '.tf': 'terraform',
+    '.yml': 'yaml',
+    '.yaml': 'yaml'
   };
 
   return languageMap[ext] || 'unknown';

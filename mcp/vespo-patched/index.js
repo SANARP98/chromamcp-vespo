@@ -794,7 +794,8 @@ class ChromaContextMCP {
             logDebug(`Smart ingest - Input path: ${dirPath} -> Effective path: ${effectivePath}, Collection: ${collection}`);
 
             // Default to code file extensions for smart ingestion
-            const defaultExtensions = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.py', '.pyw'];
+            const defaultExtensions = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.py', '.pyw',
+                                        '.tf', '.yml', '.yaml'];
             const fileExtensions = extensions
               ? extensions.split(',').map(e => e.trim().startsWith('.') ? e.trim() : `.${e.trim()}`)
               : defaultExtensions;

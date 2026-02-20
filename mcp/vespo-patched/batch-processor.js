@@ -329,7 +329,8 @@ export async function processFile(filePath, options = {}) {
 
   // NEW: Smart chunking for code files (JavaScript, TypeScript, Python)
   const ext = extname(filePath).toLowerCase();
-  const isCodeFile = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.py', '.pyw'].includes(ext);
+  const isCodeFile = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.py', '.pyw',
+                      '.tf', '.yml', '.yaml'].includes(ext);
 
   if (useSmartChunking && category.extractText && includeContent && content && isCodeFile) {
     try {

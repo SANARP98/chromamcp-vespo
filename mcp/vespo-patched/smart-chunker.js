@@ -4,6 +4,7 @@
  */
 
 import { extractChunks, detectLanguage } from './code-parser.js';
+import { extractConfigChunks, detectConfigLanguage } from './config-parser.js';
 
 /**
  * Intelligently chunk code content
@@ -22,6 +23,39 @@ export async function intelligentChunk(content, filePath, options = {}) {
   } = options;
 
   const language = detectLanguage(filePath);
+  const configLanguage = detectConfigLanguage(filePath);
+
+  // Handle config file formats (Terraform, YAML) with structure-aware chunking
+  if (configLanguage !== 'unknown') {
+    const parsedChunks = extractConfigChunks(content, filePath);
+    const finalChunks = [];
+
+    for (const chunk of parsedChunks) {
+      if (chunk.content.length <= maxChunkSize) {
+        const enriched = await enrichChunkMetadata(chunk, content, filePath, {
+          calculateComplexity,
+          languageOverride: configLanguage
+        });
+        finalChunks.push(enriched);
+      } else {
+        const splitChunks = await splitWithOverlap(chunk, {
+          maxChunkSize,
+          overlap,
+          preserveSignatures,
+          language: configLanguage
+        });
+        for (const splitChunk of splitChunks) {
+          const enriched = await enrichChunkMetadata(splitChunk, content, filePath, {
+            calculateComplexity,
+            languageOverride: configLanguage
+          });
+          finalChunks.push(enriched);
+        }
+      }
+    }
+
+    return finalChunks;
+  }
 
   // For unsupported languages, fall back to simple chunking
   if (language === 'unknown') {
@@ -170,8 +204,12 @@ function scoreSplitPoint(line, language) {
     if (trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*')) {
       return 8;
     }
-  } else if (language === 'python') {
+  } else if (language === 'python' || language === 'yaml') {
     if (trimmed.startsWith('#')) {
+      return 8;
+    }
+  } else if (language === 'terraform') {
+    if (trimmed.startsWith('#') || trimmed.startsWith('//') || trimmed.startsWith('/*')) {
       return 8;
     }
   }
@@ -259,7 +297,7 @@ function simpleChunk(content, options) {
  * @returns {Object} - Enriched chunk
  */
 async function enrichChunkMetadata(chunk, fullContent, filePath, options) {
-  const { calculateComplexity = true } = options;
+  const { calculateComplexity = true, languageOverride = null } = options;
 
   // Calculate lines of code (non-comment, non-blank)
   const loc = calculateLOC(chunk.content);
@@ -280,7 +318,7 @@ async function enrichChunkMetadata(chunk, fullContent, filePath, options) {
       // Type information
       chunk_type: chunk.type,
       name: chunk.name,
-      language: detectLanguage(filePath),
+      language: languageOverride || detectLanguage(filePath),
 
       // Position
       start_line: chunk.startLine,
