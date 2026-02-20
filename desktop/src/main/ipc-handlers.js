@@ -14,7 +14,7 @@ import { readdir, stat } from 'fs/promises'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
-import { runMcpTool, getDbPath, getMcpServerPath } from './mcp-runner'
+import { runMcpTool, listMcpTools, getDbPath, getMcpServerPath } from './mcp-runner'
 import { checkAndUpdateCodexConfig, readCodexConfigStatus } from './codex-config'
 import { getSettings, saveSettings } from './store'
 import {
@@ -168,6 +168,15 @@ export function registerIpcHandlers(_ipcMain, getWindow, emit) {
     } catch (e) {
       emit('error', `${tool} failed: ${e.message}`)
       return { success: false, error: e.message }
+    }
+  })
+
+  ipcMain.handle('vespo:list-tools', async () => {
+    try {
+      const tools = await listMcpTools()
+      return { success: true, tools }
+    } catch (e) {
+      return { success: false, error: e.message, tools: [] }
     }
   })
 

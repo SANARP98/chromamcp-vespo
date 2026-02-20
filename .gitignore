@@ -24,6 +24,8 @@ npm-debug.log*
 # Build outputs
 dist/
 build/
+!desktop/build/
+!desktop/build/**
 
 # Temporary files
 *.tmp

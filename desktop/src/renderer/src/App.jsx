@@ -4,12 +4,13 @@ import DirectoryPanel from './components/DirectoryPanel'
 import CollectionsPanel from './components/CollectionsPanel'
 import ActivityLog from './components/ActivityLog'
 import Settings from './components/Settings'
+import ToolsPanel from './components/ToolsPanel'
 
 export default function App() {
   const [status, setStatus]           = useState(null)
   const [collections, setCollections] = useState([])
   const [activities, setActivities]   = useState([])
-  const [activeTab, setActiveTab]     = useState('dashboard') // 'dashboard' | 'settings'
+  const [activeTab, setActiveTab]     = useState('dashboard') // 'dashboard' | 'tools' | 'settings'
   const [loading, setLoading]         = useState(true)
 
   // ── Bootstrap ─────────────────────────────────────────────────────────────
@@ -56,6 +57,8 @@ export default function App() {
 
       {activeTab === 'settings' ? (
         <Settings status={status} onRefresh={refresh} addActivity={addActivity} />
+      ) : activeTab === 'tools' ? (
+        <ToolsPanel addActivity={addActivity} />
       ) : (
         <div className="flex flex-1 min-h-0 overflow-hidden">
 

@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('vespo', {
   // ── Tools ────────────────────────────────────────────────────────────────
   scanDirectory: (path) => ipcRenderer.invoke('vespo:scan-directory', { path }),
   runTool: (tool, args) => ipcRenderer.invoke('vespo:run-tool', { tool, args }),
+  listTools: () => ipcRenderer.invoke('vespo:list-tools'),
 
   // ── UI helpers ───────────────────────────────────────────────────────────
   openDirectoryDialog: () => ipcRenderer.invoke('vespo:open-directory-dialog'),

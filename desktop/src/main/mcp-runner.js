@@ -38,11 +38,14 @@ export function runMcpTool(toolName, toolArgs = {}, extraEnv = {}) {
   return new Promise((resolve, reject) => {
     const serverPath = getMcpServerPath()
     const dbPath = getDbPath()
+    // Use Electron's embedded Node runtime so packaged app does not depend on system Node.js.
+    const runtime = process.execPath
 
-    const child = spawn('node', [serverPath], {
+    const child = spawn(runtime, [serverPath], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
+        ELECTRON_RUN_AS_NODE: '1',
         VESPO_DB_PATH: dbPath,
         DEBUG_MCP: 'false',
         ...extraEnv
@@ -117,5 +120,79 @@ export function runMcpTool(toolName, toolArgs = {}, extraEnv = {}) {
     const timer = setTimeout(() => {
       settle(() => reject(new Error(`Tool '${toolName}' timed out after 60s`)))
     }, 60_000)
+  })
+}
+
+export function listMcpTools(extraEnv = {}) {
+  return new Promise((resolve, reject) => {
+    const serverPath = getMcpServerPath()
+    const dbPath = getDbPath()
+    const runtime = process.execPath
+
+    const child = spawn(runtime, [serverPath], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        ELECTRON_RUN_AS_NODE: '1',
+        VESPO_DB_PATH: dbPath,
+        DEBUG_MCP: 'false',
+        ...extraEnv
+      }
+    })
+
+    let buffer = ''
+    let settled = false
+
+    function settle(fn) {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      try { child.kill() } catch {}
+      fn()
+    }
+
+    child.stdout.on('data', (data) => {
+      buffer += data.toString()
+      const lines = buffer.split('\n')
+      buffer = lines.pop()
+
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+        try {
+          const msg = JSON.parse(trimmed)
+          if (msg.id === 2) {
+            settle(() => {
+              const tools = msg.result?.tools || []
+              resolve(tools)
+            })
+          }
+        } catch {}
+      }
+    })
+
+    child.on('error', (err) => settle(() => reject(err)))
+    child.on('close', (code) => {
+      if (!settled) settle(() => reject(new Error(`MCP process exited with code ${code}`)))
+    })
+
+    const init = JSON.stringify({
+      jsonrpc: '2.0', id: 1, method: 'initialize',
+      params: {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        clientInfo: { name: 'vespo-desktop', version: '1.0.0' }
+      }
+    })
+    const list = JSON.stringify({
+      jsonrpc: '2.0', id: 2, method: 'tools/list', params: {}
+    })
+
+    child.stdin.write(init + '\n')
+    child.stdin.write(list + '\n')
+
+    const timer = setTimeout(() => {
+      settle(() => reject(new Error('Tool list timed out after 30s')))
+    }, 30_000)
   })
 }

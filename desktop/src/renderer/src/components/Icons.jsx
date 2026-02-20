@@ -161,3 +161,11 @@ export function Clock({ size = 16, className = '' }) {
     </svg>
   )
 }
+
+export function Wrench({ size = 16, className = '' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M14.7 6.3a4 4 0 0 0 3 5.8l-8.9 8.9a2 2 0 0 1-2.8-2.8l8.9-8.9a4 4 0 0 0 5.8-3l-2.9 2.9-3.1-.7-.7-3.1z" />
+    </svg>
+  )
+}

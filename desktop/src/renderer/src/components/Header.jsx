@@ -1,4 +1,4 @@
-import { RefreshCw, Settings, Database } from './Icons'
+import { RefreshCw, Settings, Database, Wrench } from './Icons'
 
 function StatusDot({ ok, label }) {
   return (
@@ -53,6 +53,19 @@ export default function Header({ status, activeTab, onTabChange, onRefresh }) {
           }`}
         >
           Dashboard
+        </button>
+
+        {/* Settings tab */}
+        <button
+          onClick={() => onTabChange('tools')}
+          className={`flex items-center gap-1 text-xs px-3 py-1.5 rounded transition-colors ${
+            activeTab === 'tools'
+              ? 'bg-vespo-border text-vespo-text'
+              : 'text-vespo-muted hover:text-vespo-text hover:bg-white/5'
+          }`}
+        >
+          <Wrench size={12} />
+          Tools
         </button>
 
         {/* Settings tab */}

@@ -48,7 +48,9 @@ function createWindow() {
 
 function setupTray() {
   try {
-    const iconPath = join(__dirname, '../../resources/icon.png')
+    const iconPath = app.isPackaged
+      ? join(process.resourcesPath, 'build', 'icon.png')
+      : join(__dirname, '../../build/icon.png')
     const img = existsSync(iconPath)
       ? nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 })
       : nativeImage.createEmpty()

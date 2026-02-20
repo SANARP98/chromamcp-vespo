@@ -1,12 +1,19 @@
 appId: com.vespo.desktop
 productName: Vespo
-copyright: Copyright © 2025 Vespo
 directories:
-  buildResources: resources
   output: dist
+  buildResources: build
 
-# Bundle the MCP server into app resources
+files:
+  - out/**/*
+  - node_modules/**/*
+  - package.json
+
 extraResources:
+  - from: "build"
+    to: "build"
+    filter:
+      - "icon.png"
   - from: "../mcp/vespo-patched"
     to: "mcp"
     filter:
@@ -14,51 +21,24 @@ extraResources:
       - "!node_modules/.cache"
       - "!**/*.test.js"
 
-files:
-  - out/**/*
-  - node_modules/**/*
-  - package.json
-
 win:
+  target: nsis
+  icon: build/icon.ico
+  signAndEditExecutable: false
+
+mac:
   target:
-    - target: nsis
-      arch: [x64]
-  icon: resources/icon.ico
+    - dmg
+    - zip
+  icon: build/icon.icns
+  category: public.app-category.developer-tools
+
+linux:
+  target: AppImage
+  icon: build/icon.png
 
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
-  installerIcon: resources/icon.ico
-  uninstallerIcon: resources/icon.ico
-  installerHeaderIcon: resources/icon.ico
-  shortcutName: Vespo
-
-mac:
-  target:
-    - target: dmg
-      arch: [x64, arm64]
-    - target: zip
-      arch: [x64, arm64]
-  icon: resources/icon.icns
-  category: public.app-category.developer-tools
-  darkModeSupport: true
-
-dmg:
-  title: Vespo
-  icon: resources/icon.icns
-  background: resources/dmg-background.png
-  window:
-    width: 540
-    height: 380
-
-linux:
-  target:
-    - target: AppImage
-      arch: [x64]
-  icon: resources/icon.png
-  category: Development
-
-publish:
-  provider: github
-  owner: sanarp98
-  repo: chromamcp-vespo
+  deleteAppDataOnUninstall: true
+  include: build/installer.nsh
